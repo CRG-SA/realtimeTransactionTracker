@@ -45,7 +45,7 @@ const defaultConfig: AppConfig = {
 
 async function readRuntimeConfig(): Promise<AppConfig> {
   try {
-    const res = await fetch("/uni-monitor.config.json", { cache: "no-store" });
+    const res = await fetch("/config.json", { cache: "no-store" });
     if (!res.ok) return defaultConfig;
     const cfg = await res.json();
     return { ...defaultConfig, ...cfg };
