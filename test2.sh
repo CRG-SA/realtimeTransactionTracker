@@ -1,0 +1,13 @@
+
+echo '{"Status":"SUCCESS","Uxd":"03/12/2025","Uxt":"12:14:22.946","Dbd":"","Eid":"sss","Hnm":"bdolitutapp1.telkom.co.za","Pid":"4272","Fid":"_log_QueryProviderEmployeesByFunction","Tid":"69300d6d-618b5-10b0-0ae3edf7","Fnm":"ssssessionimpl.cc","Mtp":"TrnEnd","Key":"11","Uid":"Kgopajt","Cid":"PIGGYBACK NOT USED","Icn":"10.254.105.48","Ocn":"","Ret":"0","Ern":"0","Ct1":"17547","Ct2":"-1:0","Msg":"Transaction ended with success"}' | nc -u -w0 127.0.0.1 20000
+
+echo '{"Status":"START","Uxd":"03/12/2025","Uxt":"12:14:23.945","Dbd":"","Eid":"sss","Hnm":"bdolitutapp1.telkom.co.za","Pid":"4367","Fid":"_log_QueryProviderChildren","Tid":"69300d7f-e6ae4-110f-0ae3edf7","Fnm":"ssssessionimpl.cc","Mtp":"TrnStart","Key":"11","Uid":"Kgopajt","Cid":"PIGGYBACK NOT USED","Icn":"10.254.105.48","Ocn":"","Ret":"0","Ern":"0","Ct1":"","Ct2":"-1:0","Msg":"QueryProviderChildren transaction started for Kgopajt"}' | nc -u -w0 127.0.0.1 20000
+
+echo '{"Status":"SUCCESS","Uxd":"03/12/2025","Uxt":"12:14:24.109","Dbd":"","Eid":"sss","Hnm":"bdolitutapp1.telkom.co.za","Pid":"4367","Fid":"_log_QueryProviderChildren","Tid":"69300d7f-e6ae4-110f-0ae3edf7","Fnm":"ssssessionimpl.cc","Mtp":"TrnEnd","Key":"11","Uid":"Kgopajt","Cid":"PIGGYBACK NOT USED","Icn":"10.254.105.48","Ocn":"","Ret":"0","Ern":"0","Ct1":"164","Ct2":"-1:0","Msg":"Transaction ended with success"}' | nc -u -w0 127.0.0.1 20000
+
+echo '{"Status":"SUCCESS","Uxd":"03/12/2025","Uxt":"12:14:30.535","Dbd":"","Eid":"sss","Hnm":"bdolitutapp1.telkom.co.za","Pid":"4349","Fid":"_log_QueryProviderEmployeesByFunction","Tid":"69300d74-cfc5d-10fd-0ae3edf7","Fnm":"ssssessionimpl.cc","Mtp":"TrnEnd","Key":"11","Uid":"Dinnera1","Cid":"PIGGYBACK NOT USED","Icn":"10.254.102.140","Ocn":"","Ret":"0","Ern":"0","Ct1":"17684","Ct2":"-1:0","Msg":"Transaction ended with success"}' | nc -u -w0 127.0.0.1 20000
+
+echo ' {"Status":"START","Uxd":"03/12/2025","Uxt":"12:14:32.354","Dbd":"","Eid":"sss","Hnm":"bdolitutapp1.telkom.co.za","Pid":"4296","Fid":"_log_QueryProviderChildren","Tid":"69300d88-567a0-10c8-0ae3edf7","Fnm":"ssssessionimpl.cc","Mtp":"TrnStart","Key":"11","Uid":"Dinnera1","Cid":"PIGGYBACK NOT USED","Icn":"10.254.102.140","Ocn":"","Ret":"0","Ern":"0","Ct1":"","Ct2":"-1:0","Msg":"QueryProviderChildren transaction started for Dinnera1"}' | nc -u -w0 127.0.0.1 20000
+
+echo '{"Status":"SUCCESS","Uxd":"03/12/2025","Uxt":"12:14:32.511","Dbd":"","Eid":"sss","Hnm":"bdolitutapp1.telkom.co.za","Pid":"4296","Fid":"_log_QueryProviderChildren","Tid":"69300d88-567a0-10c8-0ae3edf7","Fnm":"ssssessionimpl.cc","Mtp":"TrnEnd","Key":"11","Uid":"Dinnera1","Cid":"PIGGYBACK NOT USED","Icn":"10.254.102.140","Ocn":"","Ret":"0","Ern":"0","Ct1":"157","Ct2":"-1:0","Msg":"Transaction ended with success"' | nc -u -w0 127.0.0.1 20000
+
