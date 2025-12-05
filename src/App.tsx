@@ -168,7 +168,7 @@ export default function App() {
                 messages: [obj],
               };
 
-              if (status === "success" || status === "failed") {
+              if (status === "success" || status === "failed" || status === "error" || status === "failure") {
                 txn.endAt = now;
                 txn.finalStatus = status;
               }
@@ -187,7 +187,7 @@ export default function App() {
               }
               existing.messages = msgs;
 
-              if (status === "success" || status === "failed") {
+              if (status === "success" || status === "failed" || status === "error" || status === "failure") {
                 if (!existing.endAt) {
                   existing.endAt = now;
                 }
@@ -568,8 +568,7 @@ function EmptyState() {
   return (
     <div className="card card-empty">
       <div className="card-body-empty">
-        No active transactions. Send JSON lines over WebSocket to{" "}
-        <code>ws://host:port</code>.
+        No active transactions.
       </div>
     </div>
   );
