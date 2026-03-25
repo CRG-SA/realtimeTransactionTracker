@@ -48,6 +48,7 @@ server_stats = ServerStats()
 connected_clients: Set[WebSocketServerProtocol] = set()
 out_queues: Dict[WebSocketServerProtocol, asyncio.Queue] = {}
 client_by_ip: Dict[str, WebSocketServerProtocol] = {}  # Track one connection per IP
+client_ws_drops: Dict[WebSocketServerProtocol, int] = {}  # Per-client WS queue drop counts
 
 # Lock for atomic connection registration/replacement
 registration_lock = asyncio.Lock()
@@ -98,35 +99,36 @@ class UDPServer(asyncio.DatagramProtocol):
                 q.put_nowait(obj)
             except asyncio.QueueFull:
                 server_stats.ws_drop_total += 1
-                pass
+                client_ws_drops[ws] = client_ws_drops.get(ws, 0) + 1
 
 # -------------------------------
 # Per-client writer
 # -------------------------------
 async def writer_task(ws: WebSocketServerProtocol, q: asyncio.Queue, lock: asyncio.Lock):
     """
-    Block until there is data for this client. Sends only when we have data.
-    This produces ZERO traffic while idle.
+    Sends batched data at most once every 100ms. Produces ZERO traffic while idle.
     """
     try:
         while True:
-            # Wait for at least one item
-            first_obj = await q.get()
-            batch = [first_obj]
-            
-            # Drain whatever else is immediately available in the queue (up to 200 items)
-            while not q.empty() and len(batch) < 200:
+            await asyncio.sleep(0.1)
+
+            # Drain everything available in the queue
+            batch = []
+            while not q.empty():
                 try:
                     batch.append(q.get_nowait())
                 except asyncio.QueueEmpty:
                     break
-            
+
+            if not batch:
+                continue
+
             # orjson.dumps returns bytes; decode to string for WebSocket text messages
             payload = orjson.dumps(batch).decode('utf-8')
-            
+
             async with lock:
-                await ws.send(payload)           
-            
+                await ws.send(payload)
+
             for _ in range(len(batch)):
                 q.task_done()
     except ConnectionClosed:
@@ -170,11 +172,12 @@ async def ws_handler(ws: WebSocketServerProtocol, path: str):
                 await old_ws.close(1000, "Replaced by new connection")
         
         # Register client and queue
-        q = asyncio.Queue(maxsize=4000)  
+        q = asyncio.Queue(maxsize=4000)
         lock = asyncio.Lock()
         connected_clients.add(ws)
         out_queues[ws] = q
         client_by_ip[client_ip] = ws
+        client_ws_drops[ws] = 0
         print(f"🔌 WS connected from {client_ip} ({len(connected_clients)} total)")
 
     # Start writer and heartbeat tasks
@@ -195,6 +198,7 @@ async def ws_handler(ws: WebSocketServerProtocol, path: str):
         connected_clients.discard(ws)
         queue_size = q.qsize()
         out_queues.pop(ws, None)
+        client_ws_drops.pop(ws, None)
         # Only remove from IP map if this is still the current connection for this IP
         if client_by_ip.get(client_ip) == ws:
             client_by_ip.pop(client_ip, None)
@@ -241,7 +245,28 @@ async def stats_reporter():
             avg_q = 0
 
         print(f"Stats: {rx_rate:6.1f} pkts/s | RX: {server_stats.rx_total} | UDPdrop: {udp_drop_diff}/{udp_drops} | WSdrop: {ws_drop_diff}/{server_stats.ws_drop_total} | Clients: {client_count} | QMax: {max_q}")
-        
+
+        # Send each client their own stats
+        for ws in list(connected_clients):
+            q = out_queues.get(ws)
+            if q is None:
+                continue
+            drop_total = client_ws_drops.get(ws, 0)
+            stats_obj = {
+                "_type": "stats",
+                "_ts_ms": int(now * 1000),
+                "pkts_per_sec": round(rx_rate, 1),
+                "rx_total": server_stats.rx_total,
+                "udp_drop_interval": udp_drop_diff,
+                "udp_drop_total": udp_drops,
+                "ws_drop_total": drop_total,
+                "q_size": q.qsize(),
+            }
+            try:
+                q.put_nowait(stats_obj)
+            except asyncio.QueueFull:
+                pass
+
         server_stats.last_report_time = now
         server_stats.rx_last_report = server_stats.rx_total
         server_stats.ws_drop_last_report = server_stats.ws_drop_total

@@ -39,6 +39,15 @@ export type AppConfig = {
   wsPort: number;
 };
 
+export type ServerStats = {
+  pkts_per_sec: number;
+  rx_total: number;
+  udp_drop_interval: number;
+  udp_drop_total: number;
+  ws_drop_total: number;
+  q_size: number;
+};
+
 const defaultConfig: AppConfig = {
   wsPort: 8765,
 };
@@ -95,11 +104,12 @@ export default function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [actives, setActives] = useState<Map<string, ActiveTxn>>(new Map());
   const [autoRemoveOnEnd, setAutoRemoveOnEnd] = useState(true);
-  const [thresholdSeconds, setThresholdSeconds] = useState<number>(0); // "Show if ≥"
-  const [lingerSeconds, setLingerSeconds] = useState<number>(10);
+  const [thresholdSeconds, setThresholdSeconds] = useState<number>(1); // "Show if ≥"
+  const [lingerSeconds, setLingerSeconds] = useState<number>(0);
   const [filter, setFilter] = useState<string>("");
   const [expandedTid, setExpandedTid] = useState<string | null>(null);
   const [tps, setTps] = useState<number>(0);
+  const [serverStats, setServerStats] = useState<ServerStats | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<{ attempts: number; timer: any }>({
@@ -153,7 +163,9 @@ export default function App() {
           const msgs = Array.isArray(data) ? data : [data];
 
           for (const obj of msgs) {
-            if (obj && obj.Tid) {
+            if (obj && obj._type === "stats") {
+              setServerStats(obj as ServerStats);
+            } else if (obj && obj.Tid) {
               queue.push(obj);
               times.push(now);
             }
@@ -500,7 +512,27 @@ export default function App() {
         </section>
       </div>
 
+      {serverStats && <StatsOverlay stats={serverStats} />}
     </div >
+  );
+}
+
+function StatsOverlay({ stats }: { stats: ServerStats }) {
+  const hasDrops = stats.udp_drop_total > 0 || stats.ws_drop_total > 0;
+  return (
+    <div className={`stats-overlay ${hasDrops ? "stats-overlay-warn" : ""}`}>
+      <span className="stats-overlay-item">{stats.pkts_per_sec.toFixed(1)} <span className="stats-overlay-label">pkt/s</span></span>
+      <span className="stats-overlay-sep" />
+      <span className={`stats-overlay-item ${stats.udp_drop_interval > 0 ? "stats-drop-active" : ""}`}>
+        UDP <span className="stats-overlay-label">drop</span> {stats.udp_drop_total}
+      </span>
+      <span className="stats-overlay-sep" />
+      <span className={`stats-overlay-item ${stats.ws_drop_total > 0 ? "stats-drop-active" : ""}`}>
+        WS <span className="stats-overlay-label">drop</span> {stats.ws_drop_total}
+      </span>
+      <span className="stats-overlay-sep" />
+      <span className="stats-overlay-item">Q <span className="stats-overlay-label"></span>{stats.q_size}</span>
+    </div>
   );
 }
 
