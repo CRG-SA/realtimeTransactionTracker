@@ -15,6 +15,7 @@ TEMPLATE = {
     "Status": "INFO",
     "Uxd": "03/12/2025",
     "Uxt": "12:14:22.946",
+    "Bid": "bdolitutapp1.telkom.co.za",
     "Dbd": "",
     "Eid": "sss",
     "Hnm": "bdolitutapp1.telkom.co.za",

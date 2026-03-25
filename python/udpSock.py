@@ -10,7 +10,7 @@
 # Meaning: Packets dropped by the OS kernel because the receive buffer (4MB) was full. This should stay 0/0.
 # WSdrop:
 # Format: [Drops in last 5s] / [Total drops since start]
-# Meaning: Packets dropped by the Python application because a client's WebSocket queue (4000 messages) was full.
+# Meaning: Packets dropped by the Python application because a client's WebSocket queue (40000 messages) was full.
 # Clients: The number of unique active WebSocket connections (limited to one per IP).
 # QMax: The highest queue level reached by any client in the last interval. If this approaches 4000, WSdrop will begin.
 
@@ -172,7 +172,7 @@ async def ws_handler(ws: WebSocketServerProtocol, path: str):
                 await old_ws.close(1000, "Replaced by new connection")
         
         # Register client and queue
-        q = asyncio.Queue(maxsize=4000)
+        q = asyncio.Queue(maxsize=40000)
         lock = asyncio.Lock()
         connected_clients.add(ws)
         out_queues[ws] = q
@@ -261,6 +261,7 @@ async def stats_reporter():
                 "udp_drop_total": udp_drops,
                 "ws_drop_total": drop_total,
                 "q_size": q.qsize(),
+                "clients": client_count,
             }
             try:
                 q.put_nowait(stats_obj)

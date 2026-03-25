@@ -15,6 +15,7 @@ export type WireMsg = {
   Hnm?: string;
   Pid?: number;
   Fid?: string;
+  Bid?: string;
   Tid: string;
   Cid?: string;
   Uid?: string;
@@ -46,6 +47,7 @@ export type ServerStats = {
   udp_drop_total: number;
   ws_drop_total: number;
   q_size: number;
+  clients: number;
 };
 
 const defaultConfig: AppConfig = {
@@ -532,6 +534,8 @@ function StatsOverlay({ stats }: { stats: ServerStats }) {
       </span>
       <span className="stats-overlay-sep" />
       <span className="stats-overlay-item">Q <span className="stats-overlay-label"></span>{stats.q_size}</span>
+      <span className="stats-overlay-sep" />
+      <span className="stats-overlay-item">{stats.clients} <span className="stats-overlay-label">clients</span></span>
     </div>
   );
 }
@@ -627,20 +631,27 @@ const TxnRow = React.memo(({
       >
         <div className="txn-main">
           <div className="txn-header-row txn-clickable">
-            <span className="txn-tid" title={txn.tid}>
-              TID: {txn.tid}
-            </span>
-            <span className="txn-badge txn-badge-muted">
-              {human(txn.durationMs)}
-            </span>
-            {msg.Status && (
-              <span className="txn-badge txn-badge-blue">
-                {msg.Status}
+            <div className="txn-header-left">
+              <span className="txn-tid" title={txn.tid}>
+                TID: {txn.tid}
               </span>
-            )}
-            {msg.Mtp && (
-              <span className="txn-badge txn-badge-purple">
-                {msg.Mtp}
+              <span className="txn-badge txn-badge-muted">
+                {human(txn.durationMs)}
+              </span>
+              {msg.Status && (
+                <span className="txn-badge txn-badge-blue">
+                  {msg.Status}
+                </span>
+              )}
+              {msg.Mtp && (
+                <span className="txn-badge txn-badge-purple">
+                  {msg.Mtp}
+                </span>
+              )}
+            </div>
+            {msg.Bid && (
+              <span className="txn-bid" title={msg.Bid}>
+                BID: {msg.Bid}
               </span>
             )}
             <span className="expand-indicator">
