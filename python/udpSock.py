@@ -82,11 +82,7 @@ class UDPServer(asyncio.DatagramProtocol):
         obj["_src_ip"] = addr[0] 
         obj["_recv_ts_ms"] = int(time.time() * 1000)
         
-        # orjson.dumps returns bytes; decode to string for WebSocket text messages
-        payload = orjson.dumps(obj).decode('utf-8')
-
-        # Enqueue to all connected clients
-        # Use local variable access for speed
+        # Enqueue the dictionary object directly for grouping in the writer
         clients = connected_clients
         queues = out_queues
         
@@ -99,7 +95,7 @@ class UDPServer(asyncio.DatagramProtocol):
                 continue
             # Don't block UDP handler; drop if queue is full
             try:
-                q.put_nowait(payload)
+                q.put_nowait(obj)
             except asyncio.QueueFull:
                 server_stats.ws_drop_total += 1
                 pass
@@ -114,10 +110,25 @@ async def writer_task(ws: WebSocketServerProtocol, q: asyncio.Queue, lock: async
     """
     try:
         while True:
-            payload = await q.get()          
+            # Wait for at least one item
+            first_obj = await q.get()
+            batch = [first_obj]
+            
+            # Drain whatever else is immediately available in the queue (up to 200 items)
+            while not q.empty() and len(batch) < 200:
+                try:
+                    batch.append(q.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            
+            # orjson.dumps returns bytes; decode to string for WebSocket text messages
+            payload = orjson.dumps(batch).decode('utf-8')
+            
             async with lock:
                 await ws.send(payload)           
-            q.task_done()
+            
+            for _ in range(len(batch)):
+                q.task_done()
     except ConnectionClosed:
         pass
     except BaseException as e:

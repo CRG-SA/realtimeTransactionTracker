@@ -107,6 +107,8 @@ export default function App() {
     timer: 0,
   });
   const messageTimesRef = useRef<number[]>([]); // timestamps of messages for TPS
+  const incomingQueueRef = useRef<WireMsg[]>([]); // buffer for batching
+  const masterActivesRef = useRef<Map<string, ActiveTxn>>(new Map()); // source of truth
 
   // Load runtime config
   useEffect(() => {
@@ -138,67 +140,24 @@ export default function App() {
       ws.onmessage = (evt) => {
         if (isPaused) return;
         try {
-          const obj: WireMsg = JSON.parse(
+          const data = JSON.parse(
             typeof evt.data === "string" ? evt.data : String(evt.data)
           );
-          if (!obj || !obj.Tid) return;
+          if (!data) return;
 
           const now = Date.now();
-          const status = (obj.Status || "").toLowerCase();
+          const queue = incomingQueueRef.current;
+          const times = messageTimesRef.current;
 
-          // TPS tracking
-          const windowMs = 10_000;
-          const arr = messageTimesRef.current;
-          arr.push(now);
-          while (arr.length && arr[0] < now - windowMs) {
-            arr.shift();
-          }
+          // Support both single object and array of objects
+          const msgs = Array.isArray(data) ? data : [data];
 
-          // Active transactions map
-          setActives((prev) => {
-            const m = new Map(prev);
-            const existing = m.get(obj.Tid);
-
-            if (!existing) {
-              const txn: ActiveTxn = {
-                tid: obj.Tid,
-                firstSeenAt: now,
-                lastUpdateAt: now,
-                lastMsg: obj,
-                messages: [obj],
-              };
-
-              if (status === "success" || status === "failed" || status === "error" || status === "failure") {
-                txn.endAt = now;
-                txn.finalStatus = status;
-              }
-
-              m.set(obj.Tid, txn);
-            } else {
-              existing.lastUpdateAt = now;
-              existing.lastMsg = obj;
-
-              // Append to history with a cap
-              const msgs = existing.messages || [];
-              msgs.push(obj);
-              const MAX_HISTORY = 200;
-              if (msgs.length > MAX_HISTORY) {
-                msgs.shift();
-              }
-              existing.messages = msgs;
-
-              if (status === "success" || status === "failed" || status === "error" || status === "failure") {
-                if (!existing.endAt) {
-                  existing.endAt = now;
-                }
-                existing.finalStatus = status;
-              }
-
-              m.set(obj.Tid, existing);
+          for (const obj of msgs) {
+            if (obj && obj.Tid) {
+              queue.push(obj);
+              times.push(now);
             }
-
-            return m;
-          });
+          }
         } catch (e) {
           console.warn("Failed to parse message", e);
         }
@@ -253,32 +212,72 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsUrl]);
 
-  // Tick: durations, TPS, auto-remove
+  // Tick: durations, TPS, auto-remove, and Batch Processing
   useEffect(() => {
     const id = setInterval(() => {
       const now = Date.now();
+      const m = masterActivesRef.current;
 
-      // Auto-remove ended txns based on lingerSeconds
-      setActives((prev) => {
-        const mm = new Map<string, ActiveTxn>();
-        for (const [tid, txn] of prev) {
-          const ended = !!txn.endAt;
-          if (
-            autoRemoveOnEnd &&
-            ended &&
-            lingerSeconds >= 0 &&
-            now - txn.endAt! > lingerSeconds * 1000
-          ) {
-            // drop
-            continue;
+      // 1. Process Batched Messages
+      const batch = incomingQueueRef.current;
+      incomingQueueRef.current = [];
+
+      let changed = batch.length > 0;
+      for (const obj of batch) {
+        const tid = obj.Tid;
+        const status = (obj.Status || "").toLowerCase();
+        const existing = m.get(tid);
+
+        if (!existing) {
+          const txn: ActiveTxn = {
+            tid,
+            firstSeenAt: now,
+            lastUpdateAt: now,
+            lastMsg: obj,
+            messages: [obj],
+          };
+          if (status === "success" || status === "failed" || status === "error" || status === "failure") {
+            txn.endAt = now;
+            txn.finalStatus = status;
           }
-          mm.set(tid, txn);
-        }
-        // force rerender
-        return new Map(mm);
-      });
+          m.set(tid, txn);
+        } else {
+          existing.lastUpdateAt = now;
+          existing.lastMsg = obj;
+          const msgs = existing.messages || [];
+          msgs.push(obj);
+          const MAX_HISTORY = 100; // slightly reduced for performance
+          if (msgs.length > MAX_HISTORY) msgs.shift();
+          existing.messages = msgs;
 
-      // Recompute TPS (messages per second over 10s)
+          if (status === "success" || status === "failed" || status === "error" || status === "failure") {
+            if (!existing.endAt) existing.endAt = now;
+            existing.finalStatus = status;
+          }
+          m.set(tid, existing);
+        }
+      }
+
+      // 2. Auto-remove ended txns based on lingerSeconds
+      for (const [tid, txn] of m) {
+        const ended = !!txn.endAt;
+        if (
+          autoRemoveOnEnd &&
+          ended &&
+          lingerSeconds >= 0 &&
+          now - txn.endAt! > lingerSeconds * 1000
+        ) {
+          m.delete(tid);
+          changed = true;
+        }
+      }
+
+      // 3. Trigger Re-render if state changed
+      if (changed) {
+        setActives(new Map(m));
+      }
+
+      // 4. Recompute TPS (messages per second over 10s)
       setTps(() => {
         const windowMs = 10_000;
         const arr = messageTimesRef.current;
@@ -295,9 +294,9 @@ export default function App() {
 
   function removeTid(tid: string) {
     setActives((prev) => {
-      const mm = new Map(prev);
-      mm.delete(tid);
-      return mm;
+      const m = masterActivesRef.current;
+      m.delete(tid);
+      return new Map(m);
     });
     if (expandedTid === tid) {
       setExpandedTid(null);
@@ -305,6 +304,7 @@ export default function App() {
   }
 
   function clearAll() {
+    masterActivesRef.current.clear();
     setActives(new Map());
     setExpandedTid(null);
   }
@@ -334,7 +334,7 @@ export default function App() {
     };
 
     setActives((prev) => {
-      const mm = new Map(prev);
+      const m = masterActivesRef.current;
       const txn: ActiveTxn = {
         tid,
         firstSeenAt: now - Math.floor(Math.random() * 70000),
@@ -342,8 +342,8 @@ export default function App() {
         lastMsg: base,
         messages: [base],
       };
-      mm.set(tid, txn);
-      return mm;
+      m.set(tid, txn);
+      return new Map(m);
     });
   }
 
@@ -402,98 +402,81 @@ export default function App() {
         {/* Header */}
 
         <div className="app-header">
-        <section className="card card-summary">
           <section className="card card-summary">
-          <div className="header-left">
-            <h1 className="app-title">Realtime Transaction Monitor</h1>
-          </div>
-          <div className="header-right">
-            <div
-              className={`ws-connection-pill ${
-                connected === "open"
+            <div className="header-left">
+              <h1 className="app-title">Realtime Transaction Monitor</h1>
+            </div>
+            <div className="header-right">
+              <div
+                className={`ws-connection-pill ${connected === "open"
                   ? "ws-ok"
                   : connected === "connecting"
-                  ? "ws-warn"
-                  : "ws-bad"
-              }`}
-            >
-              {wsUrl || "WebSocket..."}
-            </div>
+                    ? "ws-warn"
+                    : "ws-bad"
+                  }`}
+              >
+                {wsUrl || "WebSocket..."}
+              </div>
 
-            <input
-              className="input"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter (TID, Eid, Msg...)"
-              title="Filter transactions"
-            />
+              <input
+                className="input"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter (TID, Eid, Msg...)"
+                title="Filter transactions"
+              />
 
-            {/* <button
+              {/* <button
               onClick={() => setIsPaused((p) => !p)}
               className="btn btn-secondary"
             >
               {isPaused ? "▶ Resume" : "⏸ Pause"}
             </button> */}
 
-            <button onClick={clearAll} className="btn btn-danger">
-              🗑 Clear All
-            </button>
+              <button onClick={clearAll} className="btn btn-danger">
+                🗑 Clear All
+              </button>
 
-            <button onClick={injectSample} className="btn">
-              ⏱
-            </button>
-          </div>
+              <button onClick={injectSample} className="btn">
+                ⏱
+              </button>
+            </div>
           </section>
-        
-        {/* Summary + thresholds */}
-        <section className="card card-summary">
-          <div className="summary-grid">
-            <SummaryItem label="Active" value={String(activeList.length)} />
 
-            <SummaryItem
-              label="Tx/s (last 10s)"
-              value={tps.toFixed(1)}
-            />
+          {/* Summary + thresholds */}
+          <section className="card card-summary">
+            <div className="summary-grid">
+              <SummaryItem label="Active" value={String(activeList.length)} />
 
-            <SummaryItem
-              label="Longest"
-              value={longest ? human(longest.durationMs) : "—"}
-            />
+              <SummaryItem
+                label="Tx/s (last 10s)"
+                value={tps.toFixed(1)}
+              />
 
-            <SummaryItem
-              label="Show if ≥"
-              value={`${thresholdSeconds}s`}
-              onMinus={() =>
-                setThresholdSeconds(Math.max(0, thresholdSeconds - 1))
-              }
-              onPlus={() => setThresholdSeconds(thresholdSeconds + 1)}
-            />
+              <SummaryItem
+                label="Longest"
+                value={longest ? human(longest.durationMs) : "—"}
+              />
 
-            <SummaryItem
-              label="Auto-remove (linger)"
-              value={
-                autoRemoveOnEnd ? `${lingerSeconds}s` : "Disabled"
-              }
-              onMinus={
-                autoRemoveOnEnd
-                  ? () =>
-                      setLingerSeconds(
-                        Math.max(0, lingerSeconds - 1)
-                      )
-                  : undefined
-              }
-              onPlus={
-                autoRemoveOnEnd
-                  ? () => setLingerSeconds(lingerSeconds + 1)
-                  : undefined
-              }
-              toggle={() => setAutoRemoveOnEnd(!autoRemoveOnEnd)}
-            />
-          </div>
-        </section>
+              <SummaryItem
+                label="Show if ≥"
+                value={`${thresholdSeconds}s`}
+                onMinus={() =>
+                  setThresholdSeconds(Math.max(0, thresholdSeconds - 1))
+                }
+                onPlus={() => setThresholdSeconds(thresholdSeconds + 1)}
+              />
 
-</section>
-</div>
+              <SummaryItem
+                label="Auto-remove (linger)"
+                value={autoRemoveOnEnd ? `${lingerSeconds}s` : "Disabled"}
+                onMinus={autoRemoveOnEnd ? () => setLingerSeconds(Math.max(0, lingerSeconds - 1)) : undefined}
+                onPlus={autoRemoveOnEnd ? () => setLingerSeconds(lingerSeconds + 1) : undefined}
+                toggle={() => setAutoRemoveOnEnd(!autoRemoveOnEnd)}
+              />
+            </div>
+          </section>
+        </div>
         {/* Active list */}
         <section className="txn-list">
           {activeList.length === 0 ? (
@@ -516,8 +499,8 @@ export default function App() {
           )}
         </section>
       </div>
-      
-    </div>
+
+    </div >
   );
 }
 
@@ -574,7 +557,7 @@ function EmptyState() {
   );
 }
 
-function TxnRow({
+const TxnRow = React.memo(({
   txn,
   thresholdSeconds,
   onRemove,
@@ -586,7 +569,7 @@ function TxnRow({
   onRemove: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
-}) {
+}) => {
   const sec = txn.durationMs / 1000;
   const color = colorForSeconds(sec, thresholdSeconds);
   const baseRedSeconds = Math.max(thresholdSeconds + 1, 60);
@@ -701,7 +684,7 @@ function TxnRow({
       </div>
     </div>
   );
-}
+});
 
 function KV({ k, v }: { k: string; v: string }) {
   return (
