@@ -18,6 +18,7 @@ import asyncio
 import time
 import socket
 import os
+import datetime
 from typing import Dict, Set
 
 # High-performance imports
@@ -80,8 +81,17 @@ class UDPServer(asyncio.DatagramProtocol):
         except orjson.JSONDecodeError:
             return
 
-        obj["_src_ip"] = addr[0] 
-        obj["_recv_ts_ms"] = int(time.time() * 1000)
+        obj["_src_ip"] = addr[0]
+        now_ts = time.time()
+        obj["_recv_ts_ms"] = int(now_ts * 1000)
+
+        # Fill missing Uxd/Uxt with receive timestamp
+        if not obj.get("Uxd") or not obj.get("Uxt"):
+            dt = datetime.datetime.fromtimestamp(now_ts)
+            if not obj.get("Uxd"):
+                obj["Uxd"] = dt.strftime("%d/%m/%Y")
+            if not obj.get("Uxt"):
+                obj["Uxt"] = dt.strftime("%H:%M:%S.") + f"{dt.microsecond // 1000:03d}"
         
         # Enqueue the dictionary object directly for grouping in the writer
         clients = connected_clients

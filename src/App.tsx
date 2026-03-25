@@ -80,12 +80,24 @@ function colorForSeconds(sec: number, thresholdSeconds: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+function colorForSecondsHighLoad(sec: number, thresholdSeconds: number): string {
+  const safeThreshold = Math.max(0, thresholdSeconds || 0);
+  const baseRedSeconds = Math.max(safeThreshold + 1, 60);
+  const t = clamp((sec - safeThreshold) / (baseRedSeconds - safeThreshold), 0, 1);
+  const g0 = { r: 56, g: 189, b: 248 };  // sky blue
+  const g1 = { r: 139, g: 92, b: 246 };  // violet
+  const r = Math.round(g0.r + (g1.r - g0.r) * t);
+  const g = Math.round(g0.g + (g1.g - g0.g) * t);
+  const b = Math.round(g0.b + (g1.b - g0.b) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 function human(ms: number): string {
   const s = Math.floor(ms / 1000);
   const mm = Math.floor(s / 60);
   const ss = s % 60;
   const mmm = ms % 1000;
-  if (mm > 0) return `${mm}m ${ss}s`;
+  if (mm !== undefined) return `${mm}m ${ss}s`;
   return `${ss}.${String(Math.floor(mmm / 100)).padStart(1, "0")}s`;
 }
 
@@ -112,6 +124,11 @@ export default function App() {
   const [expandedTid, setExpandedTid] = useState<string | null>(null);
   const [tps, setTps] = useState<number>(0);
   const [serverStats, setServerStats] = useState<ServerStats | null>(null);
+  const [groupBy, setGroupBy] = useState<"tid" | "bid">("tid");
+  const [expandedBids, setExpandedBids] = useState<Set<string>>(new Set());
+  const [excludedBids, setExcludedBids] = useState<Set<string>>(new Set());
+
+  const isPausedRef = useRef(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<{ attempts: number; timer: any }>({
@@ -121,6 +138,14 @@ export default function App() {
   const messageTimesRef = useRef<number[]>([]); // timestamps of messages for TPS
   const incomingQueueRef = useRef<WireMsg[]>([]); // buffer for batching
   const masterActivesRef = useRef<Map<string, ActiveTxn>>(new Map()); // source of truth
+
+  // Sync isPausedRef and flush render on unpause
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+    if (!isPaused) {
+      setActives(new Map(masterActivesRef.current));
+    }
+  }, [isPaused]);
 
   // Load runtime config
   useEffect(() => {
@@ -150,7 +175,6 @@ export default function App() {
       };
 
       ws.onmessage = (evt) => {
-        if (isPaused) return;
         try {
           const data = JSON.parse(
             typeof evt.data === "string" ? evt.data : String(evt.data)
@@ -286,8 +310,8 @@ export default function App() {
         }
       }
 
-      // 3. Trigger Re-render if state changed
-      if (changed) {
+      // 3. Trigger Re-render if state changed (skip while paused)
+      if (changed && !isPausedRef.current) {
         setActives(new Map(m));
       }
 
@@ -407,6 +431,24 @@ export default function App() {
     return list;
   }, [actives, thresholdSeconds, filter]);
 
+  const bidGroups = useMemo(() => {
+    if (groupBy !== "bid") return [];
+    const groups = new Map<string, typeof activeList>();
+    for (const txn of activeList) {
+      const bid = txn.lastMsg.Bid ?? "\x00no-bid";
+      if (!groups.has(bid)) groups.set(bid, []);
+      groups.get(bid)!.push(txn);
+    }
+    return Array.from(groups.entries())
+      .filter(([bid]) => !excludedBids.has(bid))
+      .map(([bid, txns]) => ({
+        bid,
+        txns,
+        longestDurationMs: Math.max(...txns.map((t) => t.durationMs)),
+      }))
+      .sort((a, b) => b.longestDurationMs - a.longestDurationMs);
+  }, [activeList, groupBy, excludedBids]);
+
   const longest = activeList[0];
 
   return (
@@ -440,20 +482,31 @@ export default function App() {
                 title="Filter transactions"
               />
 
-              {/* <button
-              onClick={() => setIsPaused((p) => !p)}
-              className="btn btn-secondary"
-            >
-              {isPaused ? "▶ Resume" : "⏸ Pause"}
-            </button> */}
+              <button
+                onClick={() => setIsPaused((p) => !p)}
+                className={`btn ${isPaused ? "btn-secondary btn-paused" : "btn-secondary"}`}
+              >
+                {isPaused ? "▶ Resume" : "⏸ Pause"}
+              </button>
+
+              <div className="capsule-toggle">
+                <button
+                  className={`capsule-btn${groupBy === "tid" ? " capsule-active" : ""}`}
+                  onClick={() => setGroupBy("tid")}
+                >TID</button>
+                <button
+                  className={`capsule-btn${groupBy === "bid" ? " capsule-active" : ""}`}
+                  onClick={() => setGroupBy("bid")}
+                >BID</button>
+              </div>
 
               <button onClick={clearAll} className="btn btn-danger">
                 🗑 Clear All
               </button>
 
-              <button onClick={injectSample} className="btn">
+              {/* <button onClick={injectSample} className="btn">
                 ⏱
-              </button>
+              </button> */}
             </div>
           </section>
 
@@ -488,6 +541,18 @@ export default function App() {
                 onPlus={autoRemoveOnEnd ? () => setLingerSeconds(lingerSeconds + 1) : undefined}
                 toggle={() => setAutoRemoveOnEnd(!autoRemoveOnEnd)}
               />
+
+              {excludedBids.size > 0 && (
+                <div className="summary-item summary-item-right">
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setExcludedBids(new Set())}
+                    title="Show all hidden BIDs"
+                  >
+                    {excludedBids.size} hidden · Clear
+                  </button>
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -495,6 +560,26 @@ export default function App() {
         <section className="txn-list">
           {activeList.length === 0 ? (
             <EmptyState />
+          ) : groupBy === "bid" ? (
+            bidGroups.map((g) => (
+              <BidGroupRow
+                key={g.bid}
+                bid={g.bid}
+                txns={g.txns}
+                longestDurationMs={g.longestDurationMs}
+                thresholdSeconds={thresholdSeconds}
+                isExpanded={expandedBids.has(g.bid)}
+                onToggleExpand={() => setExpandedBids((prev) => {
+                  const next = new Set(prev);
+                  next.has(g.bid) ? next.delete(g.bid) : next.add(g.bid);
+                  return next;
+                })}
+                expandedTid={expandedTid}
+                onToggleTid={(tid) => setExpandedTid(expandedTid === tid ? null : tid)}
+                onRemoveTid={removeTid}
+                onHide={(bid) => setExcludedBids((prev) => new Set([...prev, bid]))}
+              />
+            ))
           ) : (
             activeList.map((t) => (
               <TxnRow
@@ -504,9 +589,7 @@ export default function App() {
                 onRemove={() => removeTid(t.tid)}
                 isExpanded={expandedTid === t.tid}
                 onToggleExpand={() =>
-                  setExpandedTid(
-                    expandedTid === t.tid ? null : t.tid
-                  )
+                  setExpandedTid(expandedTid === t.tid ? null : t.tid)
                 }
               />
             ))
@@ -516,6 +599,123 @@ export default function App() {
 
       {serverStats && <StatsOverlay stats={serverStats} />}
     </div >
+  );
+}
+
+type TxnWithDuration = ActiveTxn & { durationMs: number };
+
+function BidGroupRow({
+  bid,
+  txns,
+  longestDurationMs,
+  thresholdSeconds,
+  isExpanded,
+  onToggleExpand,
+  expandedTid,
+  onToggleTid,
+  onRemoveTid,
+  onHide,
+}: {
+  bid: string;
+  txns: TxnWithDuration[];
+  longestDurationMs: number;
+  thresholdSeconds: number;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  expandedTid: string | null;
+  onToggleTid: (tid: string) => void;
+  onRemoveTid: (tid: string) => void;
+  onHide: (bid: string) => void;
+}) {
+  const isNoBid = bid === "\x00no-bid";
+  const sec = longestDurationMs / 1000;
+  const color = colorForSeconds(sec, thresholdSeconds);
+  const baseRedSeconds = Math.max(thresholdSeconds + 1, 60);
+  const pct = (Math.min(sec, baseRedSeconds) / baseRedSeconds) * 100;
+
+  // Latest TID by lastUpdateAt
+  const latest = txns.reduce((a, b) => b.lastUpdateAt > a.lastUpdateAt ? b : a, txns[0]);
+  const lm = latest.lastMsg;
+
+  // Aggregate statuses across all TIDs
+  const statusCounts = new Map<string, number>();
+  for (const t of txns) {
+    const s = t.lastMsg.Status || "?";
+    statusCounts.set(s, (statusCounts.get(s) ?? 0) + 1);
+  }
+
+  return (
+    <div className="bid-group card" onClick={onToggleExpand} style={{ cursor: "pointer" }}>
+      {/* colour bar — hidden when expanded */}
+      {!isExpanded && (
+        <div
+          className="txn-progress"
+          style={{ background: `linear-gradient(90deg, ${color} ${pct}%, rgba(0,0,0,0.06) ${pct}%)` }}
+        />
+      )}
+      {/* BID header */}
+      <div className="bid-group-header">
+        <div className="bid-group-header-left">
+          <span className="bid-group-label">{isNoBid ? "— no BID —" : `BID: ${bid}`}</span>
+          <span className="bid-group-count" style={(() => {
+            const n = txns.length;
+            if (n <= 5) return {};
+            const t = Math.min((n - 5) / (20 - 5), 1);
+            const r = Math.round(187 + (252 - 187) * t);  // pastel green → pastel red
+            const g = Math.round(247 + (165 - 247) * t);
+            const b = Math.round(208 + (165 - 208) * t);
+            return { background: `rgb(${r},${g},${b})`, color: "#374151", borderColor: "transparent" };
+          })()}>{txns.length} TID{txns.length !== 1 ? "s" : ""}</span>
+          <span className="bid-group-duration" style={{ color }}>{human(longestDurationMs)}</span>
+          {Array.from(statusCounts.entries()).map(([s, n]) => (
+            <span key={s} className="txn-badge txn-badge-blue">
+              {s}{n > 1 ? ` ×${n}` : ""}
+            </span>
+          ))}
+        </div>
+        <span className="expand-indicator">{isExpanded ? "▲" : "▼"}</span>
+      </div>
+
+      {/* Collapsed summary: key fields from latest TID */}
+      {!isExpanded && (
+        <div className="txn-body">
+          <div className="txn-main">
+            <div className="txn-grid">
+              {lm.Uid && <KV k="Uid" v={lm.Uid} />}
+              {lm.Hnm && <KV k="Host" v={lm.Hnm} />}
+              {lm.Eid && <KV k="Eid" v={lm.Eid} />}
+              {lm.Fid && <KV k="Fid" v={lm.Fid} />}
+              {lm.Cid && <KV k="Cid" v={lm.Cid} />}
+              {lm.Pid !== undefined && lm.Pid > 0 && <KV k="Pid" v={String(lm.Pid)} />}
+            </div>
+          </div>
+          <div className="txn-side" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="btn-icon"
+              title="Hide this BID"
+              onClick={() => onHide(bid)}
+            >✕</button>
+          </div>
+        </div>
+      )}
+
+      {/* TID breakdown — always visible, same style as TID view */}
+      {isExpanded && (
+        <div className="bid-group-children" onClick={(e) => e.stopPropagation()}>
+          {txns.map((t) => (
+            <TxnRow
+              key={t.tid}
+              txn={t}
+              thresholdSeconds={thresholdSeconds}
+              onRemove={() => onRemoveTid(t.tid)}
+              isExpanded={expandedTid === t.tid}
+              onToggleExpand={() => onToggleTid(t.tid)}
+              highLoad={txns.length > 5}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -599,15 +799,19 @@ const TxnRow = React.memo(({
   onRemove,
   isExpanded,
   onToggleExpand,
+  highLoad = false,
 }: {
   txn: ActiveTxn & { durationMs: number };
   thresholdSeconds: number;
   onRemove: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
+  highLoad?: boolean;
 }) => {
   const sec = txn.durationMs / 1000;
-  const color = colorForSeconds(sec, thresholdSeconds);
+  const color = highLoad
+    ? colorForSecondsHighLoad(sec, thresholdSeconds)
+    : colorForSeconds(sec, thresholdSeconds);
   const baseRedSeconds = Math.max(thresholdSeconds + 1, 60);
   const capped = clamp(sec, 0, baseRedSeconds);
   const pct = (capped / baseRedSeconds) * 100;
@@ -665,7 +869,7 @@ const TxnRow = React.memo(({
             {msg.Uid && <KV k="Uid" v={msg.Uid} />}
             {msg.Cid && <KV k="Cid" v={msg.Cid} />}
             {msg.Hnm && <KV k="Host" v={msg.Hnm} />}
-            {msg.Pid !== undefined && (
+            {msg.Pid !== undefined && msg.Pid > 0 && (
               <KV k="Pid" v={String(msg.Pid)} />
             )}
           </div>
@@ -673,34 +877,20 @@ const TxnRow = React.memo(({
           {msg.Msg && (
             <div className="txn-message" title={msg.Msg}>
               {msg.Msg}
+              {txn.messages && txn.messages.length > 1 && (
+                <span className="txn-msg-count">{txn.messages.length}</span>
+              )}
             </div>
           )}
 
-          {isExpanded && txn.messages && txn.messages.length > 1 && (
+          {isExpanded && txn.messages && txn.messages.length > 0 && (
             <div className="txn-history">
               {txn.messages.map((m, idx) => (
                 <div key={idx} className="txn-history-row">
-                  <span className="txn-history-time">
-                    {m.Uxt || ""}
-                  </span>
-                  {m.Status && (
-                    <span className="txn-history-status">
-                      {m.Status}
-                    </span>
-                  )}
-                  {m.Mtp && (
-                    <span className="txn-history-mtp">
-                      {m.Mtp}
-                    </span>
-                  )}
-                  {m.Msg && (
-                    <span
-                      className="txn-history-msg"
-                      title={m.Msg}
-                    >
-                      {m.Msg}
-                    </span>
-                  )}
+                  <span className="txn-history-time">{m.Uxt || ""}</span>
+                  {m.Status && <span className="txn-history-status">{m.Status}</span>}
+                  {m.Mtp && <span className="txn-history-mtp">{m.Mtp}</span>}
+                  {m.Msg && <span className="txn-history-msg" title={m.Msg}>{m.Msg}</span>}
                 </div>
               ))}
             </div>
