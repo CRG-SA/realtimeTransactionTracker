@@ -32,6 +32,14 @@ from websockets.exceptions import ConnectionClosed
 # Configuration
 UDP_PORT = int(os.environ.get("UDP_PORT", 20000))
 WS_PORT = int(os.environ.get("WS_PORT", 8765))
+LOG_FILE = os.environ.get("LOG_FILE", "")  # e.g. LOG_FILE=/tmp/udpSock.json
+
+# Optional packet logger
+_log_fh = None
+_log_buffer: list = []
+if LOG_FILE:
+    _log_fh = open(LOG_FILE, "a", buffering=8 * 1024 * 1024)  # 8MB write buffer
+    print(f"📝 Logging packets to {LOG_FILE}")
 
 # Stats
 class ServerStats:
@@ -93,6 +101,10 @@ class UDPServer(asyncio.DatagramProtocol):
             if not obj.get("Uxt"):
                 obj["Uxt"] = dt.strftime("%H:%M:%S.") + f"{dt.microsecond // 1000:03d}"
         
+        # Optional logging — buffer in memory, flushed every second
+        if _log_fh:
+            _log_buffer.append(obj)
+
         # Enqueue the dictionary object directly for grouping in the writer
         clients = connected_clients
         queues = out_queues
@@ -215,6 +227,21 @@ async def ws_handler(ws: WebSocketServerProtocol, path: str):
         print(f"❌ WS disconnected from {client_ip} ({len(connected_clients)} remaining, cleared {queue_size} pending msgs)")
 
 # -------------------------------
+# Log flusher
+# -------------------------------
+async def log_flush_task():
+    """Flush buffered packets to disk once per second."""
+    while True:
+        await asyncio.sleep(1)
+        if not _log_fh or not _log_buffer:
+            continue
+        chunk = _log_buffer.copy()
+        _log_buffer.clear()
+        for obj in chunk:
+            _log_fh.write(orjson.dumps(obj).decode("utf-8") + "\n")
+        _log_fh.flush()
+
+# -------------------------------
 # Stats Reporter
 # -------------------------------
 async def stats_reporter():
@@ -296,8 +323,10 @@ async def main():
         local_addr=("0.0.0.0", UDP_PORT),
     )
     
-    # Start stats reporter
+    # Start stats reporter and optional log flusher
     asyncio.create_task(stats_reporter())
+    if _log_fh:
+        asyncio.create_task(log_flush_task())
 
     # ping_interval=None => disable internal heartbeat to avoid collision with data
     async with serve(

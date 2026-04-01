@@ -4,6 +4,8 @@ import type { ActiveTxn, ServerStats, WireMsg } from "./types";
 import { buildWsUrl, human, readRuntimeConfig } from "./utils";
 import { BidGroupRow } from "./components/BidGroupRow";
 import { EmptyState } from "./components/EmptyState";
+import { ProcessDrillDown } from "./components/ProcessDrillDown";
+import { ServerHostBlock } from "./components/ServerHostBlock";
 import { StatsOverlay } from "./components/StatsOverlay";
 import { SummaryItem } from "./components/SummaryItem";
 import { TxnRow } from "./components/TxnRow";
@@ -15,14 +17,33 @@ export default function App() {
   const [actives, setActives] = useState<Map<string, ActiveTxn>>(new Map());
   const [autoRemoveOnEnd, setAutoRemoveOnEnd] = useState(true);
   const [thresholdSeconds, setThresholdSeconds] = useState<number>(1);
+  const [staleMinutes, setStaleMinutes] = useState<number>(2);
   const [lingerSeconds, setLingerSeconds] = useState<number>(0);
   const [filter, setFilter] = useState<string>("");
   const [expandedTid, setExpandedTid] = useState<string | null>(null);
   const [tps, setTps] = useState<number>(0);
   const [serverStats, setServerStats] = useState<ServerStats | null>(null);
-  const [groupBy, setGroupBy] = useState<"tid" | "bid">("tid");
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem("darkMode") === "true");
+  const [groupBy, setGroupBy] = useState<"tid" | "bid" | "servers" | "drilldown">(() => {
+    const v = localStorage.getItem("groupBy");
+    return (v === "tid" || v === "bid" || v === "servers") ? v : "tid";
+  });
   const [expandedBids, setExpandedBids] = useState<Set<string>>(new Set());
   const [excludedBids, setExcludedBids] = useState<Set<string>>(new Set());
+  const [groupEids, setGroupEids] = useState(() => {
+    const v = localStorage.getItem("groupEids");
+    return v === null ? true : v === "true";
+  });
+  const [editingGroups, setEditingGroups] = useState(false);
+  const [drilldownTabs, setDrilldownTabs] = useState<string[]>([]);
+  const [activeDrilldown, setActiveDrilldown] = useState<string | null>(null);
+  const [eidGroupDefs, setEidGroupDefs] = useState<{ name: string; pattern: string }[]>(() => {
+    try {
+      const v = localStorage.getItem("eidGroupDefs");
+      if (v) return JSON.parse(v);
+    } catch { /* ignore */ }
+    return [{ name: "IBT", pattern: "ibt*" }];
+  });
 
   const isPausedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -31,6 +52,19 @@ export default function App() {
   const messageTimesRef = useRef<number[]>([]);
   const incomingQueueRef = useRef<WireMsg[]>([]);
   const masterActivesRef = useRef<Map<string, ActiveTxn>>(new Map());
+  const serverActivesRef = useRef<Map<string, ActiveTxn>>(new Map());
+  const [serverActives, setServerActives] = useState<Map<string, ActiveTxn>>(new Map());
+
+  // Dark mode
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
+    localStorage.setItem("darkMode", String(darkMode));
+  }, [darkMode]);
+
+  // Persist user preferences
+  useEffect(() => { localStorage.setItem("groupBy", groupBy); }, [groupBy]);
+  useEffect(() => { localStorage.setItem("groupEids", String(groupEids)); }, [groupEids]);
+  useEffect(() => { localStorage.setItem("eidGroupDefs", JSON.stringify(eidGroupDefs)); }, [eidGroupDefs]);
 
   // Sync isPausedRef and flush render on unpause
   useEffect(() => {
@@ -56,9 +90,25 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  function connect() {
+  const cleanupSocket = useRef(() => {
+    clearTimeout(retryRef.current.timer);
+    const ws = wsRef.current;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      try { ws.close(); } catch { /* ignore */ }
+    }
+    wsRef.current = null;
+  });
+
+  const scheduleReconnect = useRef(() => {
+    const attempts = ++retryRef.current.attempts;
+    const delay = Math.min(5000, 250 * Math.pow(2, attempts));
+    clearTimeout(retryRef.current.timer);
+    retryRef.current.timer = setTimeout(() => connect.current(), delay);
+  });
+
+  const connect = useRef(() => {
     if (!wsUrlRef.current) return;
-    cleanupSocket();
+    cleanupSocket.current();
     setConnected("connecting");
     try {
       const ws = new WebSocket(wsUrlRef.current);
@@ -94,7 +144,7 @@ export default function App() {
 
       ws.onclose = () => {
         setConnected("closed");
-        scheduleReconnect();
+        scheduleReconnect.current();
       };
 
       ws.onerror = () => {
@@ -102,31 +152,14 @@ export default function App() {
       };
     } catch {
       setConnected("closed");
-      scheduleReconnect();
+      scheduleReconnect.current();
     }
-  }
-
-  function scheduleReconnect() {
-    const attempts = ++retryRef.current.attempts;
-    const delay = Math.min(5000, 250 * Math.pow(2, attempts));
-    clearTimeout(retryRef.current.timer);
-    retryRef.current.timer = setTimeout(connect, delay);
-  }
-
-  function cleanupSocket() {
-    clearTimeout(retryRef.current.timer);
-    const ws = wsRef.current;
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      try { ws.close(); } catch { /* ignore */ }
-    }
-    wsRef.current = null;
-  }
+  });
 
   useEffect(() => {
     if (!wsUrl) return;
-    connect();
-    return () => cleanupSocket();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    connect.current();
+    return () => cleanupSocket.current();
   }, [wsUrl]);
 
   // Tick: process batches, auto-remove, TPS
@@ -138,11 +171,13 @@ export default function App() {
       const batch = incomingQueueRef.current;
       incomingQueueRef.current = [];
 
+      const s = serverActivesRef.current;
       let changed = batch.length > 0;
       for (const obj of batch) {
         const tid = obj.Tid;
         const status = (obj.Status || "").toLowerCase();
         const existing = m.get(tid);
+        const isTerminal = status === "success" || status === "failed" || status === "error" || status === "failure";
 
         if (!existing) {
           const txn: ActiveTxn = {
@@ -152,7 +187,7 @@ export default function App() {
             lastMsg: obj,
             messages: [obj],
           };
-          if (status === "success" || status === "failed" || status === "error" || status === "failure") {
+          if (isTerminal) {
             txn.endAt = now;
             txn.finalStatus = status;
           }
@@ -166,13 +201,39 @@ export default function App() {
           if (msgs.length > MAX_HISTORY) msgs.shift();
           existing.messages = msgs;
 
-          if (status === "success" || status === "failed" || status === "error" || status === "failure") {
+          if (isTerminal) {
             if (!existing.endAt) existing.endAt = now;
             existing.finalStatus = status;
           }
           m.set(tid, existing);
         }
+
+        // Mirror into serverActives keyed by "Hnm:Pid" — one stable slot per process, never purged
+        if (obj.Hnm && (obj.Pid ?? 0) > 0) {
+          const procKey = `${obj.Hnm}:${obj.Pid}`;
+          const sexisting = s.get(procKey);
+          if (!sexisting || tid !== sexisting.tid) {
+            // New transaction for this process — reset slot with fresh txn
+            const txn: ActiveTxn = {
+              tid,
+              firstSeenAt: now,
+              lastUpdateAt: now,
+              lastMsg: obj,
+              messages: [obj],
+            };
+            if (isTerminal) { txn.endAt = now; txn.finalStatus = status; }
+            s.set(procKey, txn);
+          } else {
+            // Same transaction still in progress — update it
+            sexisting.lastUpdateAt = now;
+            sexisting.lastMsg = obj;
+            if (isTerminal && !sexisting.endAt) { sexisting.endAt = now; sexisting.finalStatus = status; }
+            s.set(procKey, sexisting);
+          }
+          changed = true;
+        }
       }
+      if (changed) setServerActives(new Map(s));
 
       for (const [tid, txn] of m) {
         if (
@@ -264,7 +325,152 @@ export default function App() {
       .sort((a, b) => b.longestDurationMs - a.longestDurationMs);
   }, [activeList, groupBy, excludedBids]);
 
+  const serverGroups = useMemo(() => {
+    if (groupBy !== "servers" && groupBy !== "drilldown") return [];
+
+    const now = Date.now();
+    // Group: host → eid → pid → best txn
+    const byHost = new Map<string, Map<string, Map<number, ActiveTxn & { durationMs: number }>>>();
+    for (const txn of serverActives.values()) {
+      const host = txn.lastMsg.Hnm!;
+      const eid = txn.lastMsg.Eid ?? "(no eid)";
+      const pid = txn.lastMsg.Pid!;
+      if (!byHost.has(host)) byHost.set(host, new Map());
+      const byEid = byHost.get(host)!;
+      if (!byEid.has(eid)) byEid.set(eid, new Map());
+      const byPid = byEid.get(eid)!;
+      const existing = byPid.get(pid);
+      const withDuration = { ...txn, durationMs: (txn.endAt ?? now) - txn.firstSeenAt };
+      if (!existing || txn.lastUpdateAt > existing.lastUpdateAt) byPid.set(pid, withDuration);
+    }
+
+    return Array.from(byHost.entries())
+      .map(([host, byEid]) => ({
+        host,
+        eids: Array.from(byEid.entries())
+          .map(([eid, byPid]) => ({
+            eid,
+            procs: Array.from(byPid.entries())
+              .map(([pid, txn]) => ({ pid, txn })),
+          }))
+          .sort((a, b) => a.eid.localeCompare(b.eid)),
+      }))
+      .sort((a, b) => a.host.localeCompare(b.host));
+  }, [serverActives, groupBy]);
+
   const longest = activeList[0];
+
+  function matchesPattern(eid: string, pattern: string): boolean {
+    const e = eid.toLowerCase();
+    const p = pattern.toLowerCase();
+    if (p.startsWith("*") && p.endsWith("*")) return e.includes(p.slice(1, -1));
+    if (p.startsWith("*")) return e.endsWith(p.slice(1));
+    if (p.endsWith("*")) return e.startsWith(p.slice(0, -1));
+    return e === p;
+  }
+
+  const allRawEids = Array.from(new Set(
+    serverGroups.flatMap((g) => g.eids.map((e) => e.eid))
+  )).sort((a, b) => a.localeCompare(b));
+
+  type GridRow = { label: string; eids: string[] };
+  const gridRows: GridRow[] = (() => {
+    if (!groupEids) return allRawEids.map((e) => ({ label: e, eids: [e] }));
+    const consumed = new Set<string>();
+    const rows: GridRow[] = [];
+    for (const { name, pattern } of eidGroupDefs) {
+      const matched = allRawEids.filter((e) => matchesPattern(e, pattern));
+      if (matched.length > 0) {
+        matched.forEach((e) => consumed.add(e));
+        rows.push({ label: name, eids: matched });
+      }
+    }
+    for (const eid of allRawEids) {
+      if (!consumed.has(eid)) rows.push({ label: eid, eids: [eid] });
+    }
+    return rows.sort((a, b) => a.label.localeCompare(b.label));
+  })();
+
+  const serverGridContent = serverGroups.length === 0 ? (
+    <EmptyState />
+  ) : (
+    <>
+      {editingGroups && (
+        <div className="eid-group-editor card">
+          <div className="eid-group-editor-header">
+            <span className="eid-group-editor-title">EID Groups</span>
+            <button className="btn-icon" onClick={() => setEditingGroups(false)}>✕</button>
+          </div>
+          {eidGroupDefs.map((def, i) => (
+            <div key={i} className="eid-group-editor-row">
+              <input
+                className="input eid-group-input"
+                value={def.name}
+                placeholder="Group name"
+                onChange={(e) => setEidGroupDefs((prev) => prev.map((d, j) => j === i ? { ...d, name: e.target.value } : d))}
+              />
+              <input
+                className="input eid-group-input"
+                value={def.pattern}
+                placeholder="Pattern (e.g. ibt*)"
+                onChange={(e) => setEidGroupDefs((prev) => prev.map((d, j) => j === i ? { ...d, pattern: e.target.value } : d))}
+              />
+              <button className="btn-icon" onClick={() => setEidGroupDefs((prev) => prev.filter((_, j) => j !== i))}>🗑</button>
+            </div>
+          ))}
+          <button className="btn btn-secondary" style={{ alignSelf: "flex-start", marginTop: 4 }}
+            onClick={() => setEidGroupDefs((prev) => [...prev, { name: "", pattern: "" }])}>
+            + Add group
+          </button>
+        </div>
+      )}
+      <div className="server-grid" style={{ gridTemplateColumns: `max-content ${serverGroups.map(() => "1fr").join(" ")}` }}>
+        <div className="server-grid-corner">
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className={`btn server-group-btn${groupEids ? " btn-secondary capsule-active" : " btn-secondary"}`}
+              onClick={() => setGroupEids((v) => !v)}
+            >{groupEids ? "Grouped" : "Expanded"}</button>
+            <button
+              className={`btn server-group-btn${editingGroups ? " btn-secondary capsule-active" : " btn-secondary"}`}
+              onClick={() => setEditingGroups((v) => !v)}
+            >✎</button>
+          </div>
+        </div>
+        {serverGroups.map((g) => (
+          <div key={g.host} className="server-grid-hostname">{g.host}</div>
+        ))}
+        {gridRows.map((row) => (
+          <div key={row.label} className="server-grid-row-wrap" style={{ display: "contents" }}>
+            <div
+              className="server-grid-eid-label server-grid-eid-label-clickable"
+              onClick={() => {
+                const key = row.label;
+                setDrilldownTabs((prev) => prev.includes(key) ? prev : [...prev, key]);
+                setActiveDrilldown(key);
+                setGroupBy("drilldown" as any);
+              }}
+            >{row.label}</div>
+            {serverGroups.map((g) => {
+              const matchedEids = g.eids.filter((e) => row.eids.includes(e.eid));
+              const allProcs = matchedEids.flatMap((e) => e.procs);
+              return (
+                <div key={`${g.host}-${row.label}`} className="server-grid-cell">
+                  {allProcs.length > 0 && (
+                    <ServerHostBlock
+                      group={{ host: g.host, eids: [{ eid: row.label, procs: allProcs }] }}
+                      thresholdSeconds={thresholdSeconds}
+                      staleSecs={staleMinutes * 60}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </>
+  );
 
   return (
     <div className="app-root">
@@ -273,13 +479,13 @@ export default function App() {
         <div className="app-header">
           <section className="card card-summary">
             <div className="header-left">
-              <h1 className="app-title">Realtime Transaction Monitor</h1>
+
             </div>
             <div className="header-right">
+            
               <div className={`ws-connection-pill ${connected === "open" ? "ws-ok" : connected === "connecting" ? "ws-warn" : "ws-bad"}`}>
                 {wsUrl || "WebSocket..."}
               </div>
-
               <input
                 className="input"
                 value={filter}
@@ -287,7 +493,7 @@ export default function App() {
                 placeholder="Filter (TID, Eid, Msg...)"
                 title="Filter transactions"
               />
-
+            
               <button
                 onClick={() => setIsPaused((p) => !p)}
                 className={`btn ${isPaused ? "btn-secondary btn-paused" : "btn-secondary"}`}
@@ -295,25 +501,12 @@ export default function App() {
                 {isPaused ? "▶ Resume" : "⏸ Pause"}
               </button>
 
-              <div className="capsule-toggle">
-                <button
-                  className={`capsule-btn${groupBy === "tid" ? " capsule-active" : ""}`}
-                  onClick={() => setGroupBy("tid")}
-                >TID</button>
-                <button
-                  className={`capsule-btn${groupBy === "bid" ? " capsule-active" : ""}`}
-                  onClick={() => setGroupBy("bid")}
-                >BID</button>
-              </div>
-
               <button onClick={clearAll} className="btn btn-danger">
                 🗑 Clear All
               </button>
-            </div>
-          </section>
 
-          <section className="card card-summary">
-            <div className="summary-grid">
+              <div style={{ width: 16 }} />
+
               <SummaryItem label="Active" value={String(activeList.length)} />
               <SummaryItem label="Tx/s (last 10s)" value={tps.toFixed(1)} />
               <SummaryItem label="Longest" value={longest ? human(longest.durationMs) : "—"} />
@@ -330,23 +523,88 @@ export default function App() {
                 onPlus={autoRemoveOnEnd ? () => setLingerSeconds(lingerSeconds + 1) : undefined}
                 toggle={() => setAutoRemoveOnEnd(!autoRemoveOnEnd)}
               />
+              <SummaryItem
+                label="Stale after"
+                value={`${staleMinutes}m`}
+                onMinus={() => setStaleMinutes((v) => Math.max(1, v - 1))}
+                onPlus={() => setStaleMinutes((v) => v + 1)}
+              />
               {excludedBids.size > 0 && (
-                <div className="summary-item summary-item-right">
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => setExcludedBids(new Set())}
-                    title="Show all hidden BIDs"
-                  >
-                    {excludedBids.size} hidden · Clear
-                  </button>
-                </div>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setExcludedBids(new Set())}
+                  title="Show all hidden BIDs"
+                >
+                  {excludedBids.size} hidden · Clear
+                </button>
               )}
+
+              <div style={{ marginLeft: "auto" }} />
+              <button
+                className="btn btn-secondary"
+                onClick={() => setDarkMode((v) => !v)}
+                title="Toggle dark mode"
+              >
+                {darkMode ? "☀️" : "🌙"}
+              </button>
+
             </div>
           </section>
+
+          <div className="group-tabs">
+            <button
+              className={`group-tab${groupBy === "tid" ? " group-tab-active" : ""}`}
+              onClick={() => setGroupBy("tid")}
+            >TID</button>
+            <button
+              className={`group-tab${groupBy === "bid" ? " group-tab-active" : ""}`}
+              onClick={() => setGroupBy("bid")}
+            >BID</button>
+            <button
+              className={`group-tab${groupBy === "servers" ? " group-tab-active" : ""}`}
+              onClick={() => setGroupBy("servers")}
+            >Robot</button>
+            {drilldownTabs.map((key) => (
+              <button
+                key={key}
+                className={`group-tab${groupBy === "drilldown" && activeDrilldown === key ? " group-tab-active" : ""}`}
+                onClick={() => { setActiveDrilldown(key); setGroupBy("drilldown" as any); }}
+              >
+                {key}
+                <span
+                  className="drilldown-tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDrilldownTabs((prev) => {
+                      const next = prev.filter((k) => k !== key);
+                      if (activeDrilldown === key) {
+                        setActiveDrilldown(next.length > 0 ? next[next.length - 1]! : null);
+                        if (next.length === 0) setGroupBy("servers");
+                      }
+                      return next;
+                    });
+                  }}
+                >✕</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <section className="txn-list">
-          {activeList.length === 0 ? (
+          {groupBy === "drilldown" && activeDrilldown ? (() => {
+            const label = activeDrilldown;
+            const row = gridRows.find((r) => r.label === label);
+            const allProcs = row
+              ? serverGroups.flatMap((g) =>
+                  g.eids.filter((e) => row.eids.includes(e.eid)).flatMap((e) =>
+                    e.procs.map((p) => ({ ...p, host: g.host }))
+                  )
+                )
+              : [];
+            return <ProcessDrillDown label={label} procs={allProcs} staleSecs={staleMinutes * 60} />;
+          })() : groupBy === "servers" ? (
+            serverGridContent
+          ) : activeList.length === 0 ? (
             <EmptyState />
           ) : groupBy === "bid" ? (
             bidGroups.map((g) => (

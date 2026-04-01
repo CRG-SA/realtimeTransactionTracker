@@ -7,9 +7,9 @@ export function SummaryItem({
 }: {
   label: string;
   value: string;
-  onMinus?: () => void;
-  onPlus?: () => void;
-  toggle?: () => void;
+  onMinus?: (() => void) | undefined;
+  onPlus?: (() => void) | undefined;
+  toggle?: (() => void) | undefined;
 }) {
   const isDisabled = value === "Disabled";
 
