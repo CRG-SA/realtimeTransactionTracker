@@ -1,4 +1,4 @@
-import { AppConfig } from "./types";
+import type { AppConfig } from "./types";
 
 export const defaultConfig: AppConfig = { wsPort: 8765 };
 
@@ -53,7 +53,7 @@ export function buildWsUrl(cfg: AppConfig): string {
   const loc = window.location;
   const isHttps = loc.protocol === "https:";
   const proto = isHttps ? "wss" : "ws";
-  const host = loc.hostname || "localhost";
+  const host = cfg.wsHost ?? loc.hostname ?? "localhost";
   const port = cfg.wsPort ?? 8765;
   return `${proto}://${host}:${port}`;
 }

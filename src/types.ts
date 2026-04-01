@@ -29,6 +29,7 @@ export type ActiveTxn = {
 
 export type AppConfig = {
   wsPort: number;
+  wsHost?: string;
 };
 
 export type ServerStats = {

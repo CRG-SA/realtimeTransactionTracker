@@ -1,4 +1,4 @@
-import { ServerStats } from "../types";
+import type { ServerStats } from "../types";
 
 export function StatsOverlay({ stats }: { stats: ServerStats }) {
   const hasDrops = stats.udp_drop_total > 0 || stats.ws_drop_total > 0;

@@ -1,5 +1,5 @@
 import React from "react";
-import { ActiveTxn } from "../types";
+import type { ActiveTxn } from "../types";
 import { clamp, colorForSeconds, colorForSecondsHighLoad, human } from "../utils";
 import { KV } from "./KV";
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { ActiveTxn, ServerStats, WireMsg } from "./types";
+import type { ActiveTxn, ServerStats, WireMsg } from "./types";
 import { buildWsUrl, human, readRuntimeConfig } from "./utils";
 import { BidGroupRow } from "./components/BidGroupRow";
 import { EmptyState } from "./components/EmptyState";
@@ -26,6 +26,7 @@ export default function App() {
 
   const isPausedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const wsUrlRef = useRef<string>("");
   const retryRef = useRef<{ attempts: number; timer: any }>({ attempts: 0, timer: 0 });
   const messageTimesRef = useRef<number[]>([]);
   const incomingQueueRef = useRef<WireMsg[]>([]);
@@ -39,6 +40,11 @@ export default function App() {
     }
   }, [isPaused]);
 
+  // Keep wsUrlRef in sync so connect() always sees the latest URL
+  useEffect(() => {
+    wsUrlRef.current = wsUrl;
+  }, [wsUrl]);
+
   // Load runtime config
   useEffect(() => {
     let cancelled = false;
@@ -51,11 +57,11 @@ export default function App() {
   }, []);
 
   function connect() {
-    if (!wsUrl) return;
+    if (!wsUrlRef.current) return;
     cleanupSocket();
     setConnected("connecting");
     try {
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(wsUrlRef.current);
       wsRef.current = ws;
 
       ws.onopen = () => {

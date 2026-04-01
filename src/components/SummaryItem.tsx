@@ -2,7 +2,7 @@ export function SummaryItem({
   label,
   value,
   onMinus,
-  onPlus,
+  onPlus, 
   toggle,
 }: {
   label: string;

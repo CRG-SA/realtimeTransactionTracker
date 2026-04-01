@@ -1,4 +1,4 @@
-import { ActiveTxn } from "../types";
+import type { ActiveTxn } from "../types";
 import { colorForSeconds, human } from "../utils";
 import { KV } from "./KV";
 import { TxnRow } from "./TxnRow";
@@ -35,7 +35,7 @@ export function BidGroupRow({
   const pct = (Math.min(sec, baseRedSeconds) / baseRedSeconds) * 100;
 
   const latest = txns.reduce((a, b) => b.lastUpdateAt > a.lastUpdateAt ? b : a, txns[0]);
-  const lm = latest.lastMsg;
+  const lm = latest?.lastMsg;
 
   const statusCounts = new Map<string, number>();
   for (const t of txns) {
