@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import type { ActiveTxn, ServerStats, WireMsg } from "./types";
 import { buildWsUrl, human, readRuntimeConfig } from "./utils";
+import { useTabRegistry } from "./hooks/useTabRegistry";
 import { BidGroupRow } from "./components/BidGroupRow";
 import { EmptyState } from "./components/EmptyState";
 import { ProcessDrillDown } from "./components/ProcessDrillDown";
@@ -11,6 +12,10 @@ import { SummaryItem } from "./components/SummaryItem";
 import { TxnRow } from "./components/TxnRow";
 
 export default function App() {
+  const { otherTabs, suppressReconnect } = useTabRegistry();
+  const suppressReconnectRef = useRef(suppressReconnect);
+  const prevSuppressRef = useRef(suppressReconnect);
+  suppressReconnectRef.current = suppressReconnect;
   const [wsUrl, setWsUrl] = useState<string>("");
   const [connected, setConnected] = useState<"connecting" | "open" | "closed">("connecting");
   const [isPaused, setIsPaused] = useState(false);
@@ -61,6 +66,20 @@ export default function App() {
     localStorage.setItem("darkMode", String(darkMode));
   }, [darkMode]);
 
+  // Auto-reconnect when primary session closes (suppress lifts)
+  useEffect(() => {
+    const wasSupressed = prevSuppressRef.current;
+    prevSuppressRef.current = suppressReconnect;
+    if (wasSupressed && !suppressReconnect) {
+      const ws = wsRef.current;
+      const isClosed = !ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING;
+      if (isClosed) {
+        console.log("[WS] primary session gone — reconnecting");
+        connect.current();
+      }
+    }
+  }, [suppressReconnect]);
+
   // Persist user preferences
   useEffect(() => { localStorage.setItem("groupBy", groupBy); }, [groupBy]);
   useEffect(() => { localStorage.setItem("groupEids", String(groupEids)); }, [groupEids]);
@@ -100,8 +119,13 @@ export default function App() {
   });
 
   const scheduleReconnect = useRef(() => {
+    if (suppressReconnectRef.current) {
+      console.log("[WS] reconnect suppressed — oldest tab, not focused, other session active");
+      return;
+    }
     const attempts = ++retryRef.current.attempts;
     const delay = Math.min(5000, 250 * Math.pow(2, attempts));
+    console.log(`[WS] reconnecting in ${delay}ms (attempt #${attempts})`);
     clearTimeout(retryRef.current.timer);
     retryRef.current.timer = setTimeout(() => connect.current(), delay);
   });
@@ -115,6 +139,7 @@ export default function App() {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        console.log(`[WS] connected to ${wsUrlRef.current}`);
         setConnected("open");
         retryRef.current.attempts = 0;
       };
@@ -142,12 +167,14 @@ export default function App() {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (evt) => {
+        console.warn(`[WS] closed — code=${evt.code} reason="${evt.reason || "(none)"}" wasClean=${evt.wasClean} url=${wsUrlRef.current}`);
         setConnected("closed");
         scheduleReconnect.current();
       };
 
-      ws.onerror = () => {
+      ws.onerror = (evt) => {
+        console.error(`[WS] error event`, evt);
         try { ws.close(); } catch { /* ignore */ }
       };
     } catch {
@@ -474,6 +501,19 @@ export default function App() {
 
   return (
     <div className="app-root">
+      {otherTabs.length > 0 && (
+        <div className="other-tabs-banner">
+          <span className="other-tabs-label">⚠ {otherTabs.length} other session{otherTabs.length > 1 ? "s" : ""} open on this machine{suppressReconnect ? " — reconnect paused (not in focus)" : ""}</span>
+          {otherTabs
+            .slice()
+            .sort((a, b) => a.openedAt - b.openedAt)
+            .map((tab, i) => (
+              <span key={tab.id} className="other-tabs-pill">
+                Session {i + 1} — opened {new Date(tab.openedAt).toLocaleTimeString()}
+              </span>
+            ))}
+        </div>
+      )}
       <div className="app-container">
 
         <div className="app-header">

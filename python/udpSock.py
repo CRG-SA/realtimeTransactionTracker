@@ -56,10 +56,9 @@ server_stats = ServerStats()
 # Track clients and their outbound queues
 connected_clients: Set[WebSocketServerProtocol] = set()
 out_queues: Dict[WebSocketServerProtocol, asyncio.Queue] = {}
-client_by_ip: Dict[str, WebSocketServerProtocol] = {}  # Track one connection per IP
 client_ws_drops: Dict[WebSocketServerProtocol, int] = {}  # Per-client WS queue drop counts
 
-# Lock for atomic connection registration/replacement
+# Lock for atomic connection registration
 registration_lock = asyncio.Lock()
 
 # UDP socket reference for stats
@@ -130,6 +129,7 @@ async def writer_task(ws: WebSocketServerProtocol, q: asyncio.Queue, lock: async
     """
     Sends batched data at most once every 100ms. Produces ZERO traffic while idle.
     """
+    client_ip = ws.remote_address[0] if ws.remote_address else "unknown"
     try:
         while True:
             await asyncio.sleep(0.1)
@@ -153,25 +153,34 @@ async def writer_task(ws: WebSocketServerProtocol, q: asyncio.Queue, lock: async
 
             for _ in range(len(batch)):
                 q.task_done()
-    except ConnectionClosed:
+    except ConnectionClosed as e:
+        code = e.rcvd.code if e.rcvd else "?"
+        reason = (e.rcvd.reason or "(none)") if e.rcvd else "?"
+        print(f"✍️  [{client_ip}] writer stopped — connection closed code={code} reason='{reason}'")
+    except asyncio.CancelledError:
         pass
     except BaseException as e:
-        if not isinstance(e, asyncio.CancelledError):
-            print(f"⚠️  writer error: {e!r}")
+        print(f"⚠️  [{client_ip}] writer unexpected error: {e!r}")
 
 async def heartbeat_task(ws: WebSocketServerProtocol, lock: asyncio.Lock):
     """Manual ping/pong to prevent AssertionError under high load."""
+    client_ip = ws.remote_address[0] if ws.remote_address else "unknown"
     try:
         while True:
             await asyncio.sleep(20)
             async with lock:
-                # Use a small timeout for the ping frame itself
                 pong_waiter = await ws.ping()
                 await asyncio.wait_for(pong_waiter, timeout=10)
-    except (ConnectionClosed, asyncio.TimeoutError, asyncio.CancelledError):
+    except asyncio.TimeoutError:
+        print(f"💔 [{client_ip}] heartbeat timeout — no pong received within 10s, closing")
+        try: await ws.close(1001, "heartbeat timeout")
+        except Exception: pass
+    except ConnectionClosed as e:
+        print(f"💔 [{client_ip}] connection closed during heartbeat — code={e.rcvd.code if e.rcvd else '?'} reason='{e.rcvd.reason if e.rcvd else '?'}'")
+    except asyncio.CancelledError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️  [{client_ip}] heartbeat unexpected error: {e!r}")
 
 # -------------------------------
 # WebSocket handler
@@ -181,24 +190,11 @@ async def ws_handler(ws: WebSocketServerProtocol, path: str):
     client_ip = ws.remote_address[0] if ws.remote_address else "unknown"
     
     async with registration_lock:
-        # Close existing connection from same IP and clean it up immediately
-        if client_ip in client_by_ip:
-            old_ws = client_by_ip[client_ip]
-            if old_ws in connected_clients:
-                print(f"🔄 Replacing existing connection from {client_ip}")
-                # Clean up old connection immediately
-                connected_clients.discard(old_ws)
-                out_queues.pop(old_ws, None)
-                client_by_ip.pop(client_ip, None)
-                # Then close it (this will trigger its finally block, but cleanup already done)
-                await old_ws.close(1000, "Replaced by new connection")
-        
-        # Register client and queue
+        # Register client and queue — allow multiple connections per IP
         q = asyncio.Queue(maxsize=40000)
         lock = asyncio.Lock()
         connected_clients.add(ws)
         out_queues[ws] = q
-        client_by_ip[client_ip] = ws
         client_ws_drops[ws] = 0
         print(f"🔌 WS connected from {client_ip} ({len(connected_clients)} total)")
 
@@ -209,6 +205,16 @@ async def ws_handler(ws: WebSocketServerProtocol, path: str):
     try:
         # We ignore inbound messages; just keep connection open.
         await ws.wait_closed()
+        close_code = ws.close_code
+        close_reason = ws.close_reason or "(none)"
+        print(f"🔌 [{client_ip}] connection closed normally — code={close_code} reason='{close_reason}'")
+    except ConnectionClosed as e:
+        code = e.rcvd.code if e.rcvd else "?"
+        reason = (e.rcvd.reason or "(none)") if e.rcvd else "?"
+        sent_code = e.sent.code if e.sent else "?"
+        print(f"❌ [{client_ip}] ConnectionClosed — rcvd code={code} reason='{reason}' sent code={sent_code}")
+    except Exception as e:
+        print(f"⚠️  [{client_ip}] unexpected handler error: {e!r}")
     finally:
         # Cleanup - must complete fully to avoid leaking connections
         heartbeat.cancel()
@@ -221,10 +227,7 @@ async def ws_handler(ws: WebSocketServerProtocol, path: str):
         queue_size = q.qsize()
         out_queues.pop(ws, None)
         client_ws_drops.pop(ws, None)
-        # Only remove from IP map if this is still the current connection for this IP
-        if client_by_ip.get(client_ip) == ws:
-            client_by_ip.pop(client_ip, None)
-        print(f"❌ WS disconnected from {client_ip} ({len(connected_clients)} remaining, cleared {queue_size} pending msgs)")
+        print(f"🧹 [{client_ip}] cleanup done ({len(connected_clients)} remaining, cleared {queue_size} queued msgs)")
 
 # -------------------------------
 # Log flusher
