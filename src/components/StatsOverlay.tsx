@@ -1,9 +1,9 @@
 import type { ServerStats } from "../types";
 
-export function StatsOverlay({ stats }: { stats: ServerStats }) {
+export function StatsOverlay({ stats, onClick }: { stats: ServerStats; onClick?: () => void }) {
   const hasDrops = stats.udp_drop_total > 0 || stats.ws_drop_total > 0;
   return (
-    <div className={`stats-overlay ${hasDrops ? "stats-overlay-warn" : ""}`}>
+    <div className={`stats-overlay ${hasDrops ? "stats-overlay-warn" : ""}`} style={{ cursor: "pointer" }} onClick={onClick}>
       <span className="stats-overlay-item">
         {stats.pkts_per_sec.toFixed(1)} <span className="stats-overlay-label">pkt/s</span>
       </span>

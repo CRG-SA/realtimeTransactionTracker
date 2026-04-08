@@ -1,6 +1,17 @@
 import type { AppConfig } from "./types";
 
-export const defaultConfig: AppConfig = { wsPort: 8765 };
+export const defaultConfig: AppConfig = {
+  wsPort: 8765,
+  thresholdSeconds: 1,
+  staleMinutes: 2,
+  lingerSeconds: 0,
+  autoRemoveOnEnd: true,
+  tpsInnerDotThreshold: 1,
+  busyPctInnerDotThreshold: 60,
+  busyLingerMs: 500,
+  busyWindowMs: 30000,
+  busyWindowTxns: 10,
+};
 
 export async function readRuntimeConfig(): Promise<AppConfig> {
   try {

@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { ActiveTxn } from "../types";
 import { human } from "../utils";
 
-type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number }; host?: string };
+type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number }; host?: string; txnCount?: number; tps?: number; busyPct?: number };
 
 const BUSY_LINGER_MS = 500;
 
-const DEFAULT_WIDTHS = [22, 52, 50, 180, 70, 80, 80, 80, 80, 60, 260];
-const COLS = ["", "Status", "PID", "Tid", "Status", "Mtp", "Fid", "Uid", "Seen", "Dur", "Msg"];
+const DEFAULT_WIDTHS = [22, 52, 50, 60, 55, 55, 180, 70, 80, 80, 80, 80, 60, 260];
+const COLS = ["", "Status", "PID", "Txns", "Tx/s", "%Busy", "Tid", "Status", "Mtp", "Fid", "Uid", "Seen", "Dur", "Msg"];
 
 function useColWidths() {
   const [widths, setWidths] = useState<number[]>(DEFAULT_WIDTHS);
@@ -35,7 +35,7 @@ function useColWidths() {
   return { widths, onMouseDown };
 }
 
-function ProcRow({ pid, txn, staleSecs }: { pid: number; txn: ActiveTxn & { durationMs: number }; staleSecs: number }) {
+function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct }: { pid: number; txn: ActiveTxn & { durationMs: number }; staleSecs: number; txnCount: number; tps: number; busyPct: number }) {
   const STALE_MS = staleSecs * 1000;
   const rawBusy = !txn.finalStatus;
   const [busy, setBusy] = useState(rawBusy);
@@ -65,17 +65,24 @@ function ProcRow({ pid, txn, staleSecs }: { pid: number; txn: ActiveTxn & { dura
     return () => clearInterval(id);
   }, [txn.lastUpdateAt, staleSecs]);
 
-  const dotClass = stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
-  const statusLabel = stale ? "stale" : busy ? "busy" : "idle";
-  const statusClass = stale ? "status-stale" : busy ? "status-busy" : "status-idle";
+  const statusUp = (msg.Status ?? "").toUpperCase();
+  const isDied = statusUp === "DIED";
+  const isShutdown = statusUp === "SHUTDOWN";
+  const hasError = statusUp === "ERROR";
+  const dotClass = isDied || isShutdown ? "dot-dead" : stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
+  const statusLabel = isDied ? "died" : isShutdown ? "shutdown" : stale ? "stale" : busy ? "busy" : "idle";
+  const statusClass = isDied ? "status-died" : isShutdown ? "status-shutdown" : stale ? "status-stale" : busy ? "status-busy" : "status-idle";
   const firstSeen = new Date(txn.firstSeenAt).toLocaleTimeString();
   const dur = human(txn.durationMs);
 
   return (
     <tr className="dd-tr">
-      <td className="dd-td dd-td-dot"><div className={`server-proc-dot ${dotClass}`} /></td>
+      <td className="dd-td dd-td-dot"><div className={`server-proc-dot ${dotClass}${hasError || isDied ? " dot-error-ring" : ""}`} /></td>
       <td className="dd-td" title={statusLabel}><span className={statusClass}>{statusLabel}</span></td>
       <td className="dd-td" title={String(pid)}>{pid}</td>
+      <td className="dd-td" title={String(txnCount)}>{txnCount.toLocaleString()}</td>
+      <td className="dd-td" title={tps.toFixed(1)}>{tps.toFixed(1)}</td>
+      <td className="dd-td" title={`${busyPct.toFixed(2)}%`}>{busyPct.toFixed(2)}%</td>
       <td className="dd-td dd-mono" title={msg.Tid ?? ""}>{msg.Tid ?? "—"}</td>
       <td className="dd-td" title={msg.Status ?? ""}>{msg.Status ?? "—"}</td>
       <td className="dd-td" title={msg.Mtp ?? ""}>{msg.Mtp ?? "—"}</td>
@@ -111,8 +118,8 @@ function DrillDownTable({ hostProcs, staleSecs }: { hostProcs: ProcEntry[]; stal
         </tr>
       </thead>
       <tbody>
-        {hostProcs.map(({ pid, txn }) => (
-          <ProcRow key={pid} pid={pid} txn={txn} staleSecs={staleSecs} />
+        {hostProcs.map(({ pid, txn, txnCount, tps, busyPct }) => (
+          <ProcRow key={pid} pid={pid} txn={txn} staleSecs={staleSecs} txnCount={txnCount ?? 0} tps={tps ?? 0} busyPct={busyPct ?? 0} />
         ))}
       </tbody>
     </table>

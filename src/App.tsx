@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import type { ActiveTxn, ServerStats, WireMsg } from "./types";
-import { buildWsUrl, human, readRuntimeConfig } from "./utils";
+import type { ActiveTxn, AppConfig, ServerStats, WireMsg } from "./types";
+import { buildWsUrl, defaultConfig, human, readRuntimeConfig } from "./utils";
 import { useTabRegistry } from "./hooks/useTabRegistry";
 import { BidGroupRow } from "./components/BidGroupRow";
 import { EmptyState } from "./components/EmptyState";
 import { ProcessDrillDown } from "./components/ProcessDrillDown";
 import { ServerHostBlock } from "./components/ServerHostBlock";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { StatsOverlay } from "./components/StatsOverlay";
 import { SummaryItem } from "./components/SummaryItem";
 import { TxnRow } from "./components/TxnRow";
@@ -20,10 +21,15 @@ export default function App() {
   const [connected, setConnected] = useState<"connecting" | "open" | "closed">("connecting");
   const [isPaused, setIsPaused] = useState(false);
   const [actives, setActives] = useState<Map<string, ActiveTxn>>(new Map());
-  const [autoRemoveOnEnd, setAutoRemoveOnEnd] = useState(true);
-  const [thresholdSeconds, setThresholdSeconds] = useState<number>(1);
-  const [staleMinutes, setStaleMinutes] = useState<number>(2);
-  const [lingerSeconds, setLingerSeconds] = useState<number>(0);
+  const [autoRemoveOnEnd, setAutoRemoveOnEnd] = useState(defaultConfig.autoRemoveOnEnd!);
+  const [thresholdSeconds, setThresholdSeconds] = useState<number>(defaultConfig.thresholdSeconds!);
+  const [staleMinutes, setStaleMinutes] = useState<number>(defaultConfig.staleMinutes!);
+  const [lingerSeconds, setLingerSeconds] = useState<number>(defaultConfig.lingerSeconds!);
+  const [tpsInnerDotThreshold, setTpsInnerDotThreshold] = useState<number>(defaultConfig.tpsInnerDotThreshold!);
+  const [busyPctInnerDotThreshold, setBusyPctInnerDotThreshold] = useState<number>(defaultConfig.busyPctInnerDotThreshold!);
+  const [busyLingerMs, setBusyLingerMs] = useState<number>(defaultConfig.busyLingerMs!);
+  const [busyWindowMs, setBusyWindowMs] = useState<number>(defaultConfig.busyWindowMs!);
+  const [busyWindowTxns, setBusyWindowTxns] = useState<number>(defaultConfig.busyWindowTxns!);
   const [filter, setFilter] = useState<string>("");
   const [expandedTid, setExpandedTid] = useState<string | null>(null);
   const [tps, setTps] = useState<number>(0);
@@ -40,6 +46,8 @@ export default function App() {
     return v === null ? true : v === "true";
   });
   const [editingGroups, setEditingGroups] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showClients, setShowClients] = useState(false);
   const [drilldownTabs, setDrilldownTabs] = useState<string[]>([]);
   const [activeDrilldown, setActiveDrilldown] = useState<string | null>(null);
   const [eidGroupDefs, setEidGroupDefs] = useState<{ name: string; pattern: string }[]>(() => {
@@ -58,7 +66,18 @@ export default function App() {
   const incomingQueueRef = useRef<WireMsg[]>([]);
   const masterActivesRef = useRef<Map<string, ActiveTxn>>(new Map());
   const serverActivesRef = useRef<Map<string, ActiveTxn>>(new Map());
+  const procTxnCountRef = useRef<Map<string, number>>(new Map());
+  const procTxnTimesRef = useRef<Map<string, number[]>>(new Map());
+  // busy intervals: { start, end? } — end=undefined means still running
+  const procBusyIntervalsRef = useRef<Map<string, { start: number; end?: number }[]>>(new Map());
   const [serverActives, setServerActives] = useState<Map<string, ActiveTxn>>(new Map());
+  const [serverTick, setServerTick] = useState(0);
+
+  // Force serverGroups recompute every second so TPS/busy decay even with no incoming data
+  useEffect(() => {
+    const id = setInterval(() => setServerTick((v) => v + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Dark mode
   useEffect(() => {
@@ -105,6 +124,15 @@ export default function App() {
       const cfg = await readRuntimeConfig();
       if (cancelled) return;
       setWsUrl(buildWsUrl(cfg));
+      if (cfg.thresholdSeconds !== undefined) setThresholdSeconds(cfg.thresholdSeconds);
+      if (cfg.staleMinutes !== undefined) setStaleMinutes(cfg.staleMinutes);
+      if (cfg.lingerSeconds !== undefined) setLingerSeconds(cfg.lingerSeconds);
+      if (cfg.autoRemoveOnEnd !== undefined) setAutoRemoveOnEnd(cfg.autoRemoveOnEnd);
+      if (cfg.tpsInnerDotThreshold !== undefined) setTpsInnerDotThreshold(cfg.tpsInnerDotThreshold);
+      if (cfg.busyPctInnerDotThreshold !== undefined) setBusyPctInnerDotThreshold(cfg.busyPctInnerDotThreshold);
+      if (cfg.busyLingerMs !== undefined) setBusyLingerMs(cfg.busyLingerMs);
+      if (cfg.busyWindowMs !== undefined) setBusyWindowMs(cfg.busyWindowMs);
+      if (cfg.busyWindowTxns !== undefined) setBusyWindowTxns(cfg.busyWindowTxns);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -157,9 +185,16 @@ export default function App() {
           for (const obj of msgs) {
             if (obj && obj._type === "stats") {
               setServerStats(obj as ServerStats);
-            } else if (obj && obj.Tid) {
-              queue.push(obj);
-              times.push(now);
+            } else if (obj) {
+              // Normalize Pid to number (sender may send as string)
+              if (obj.Pid !== undefined) obj.Pid = Number(obj.Pid);
+              if (obj.Tid) {
+                queue.push(obj);
+                times.push(now);
+              } else if (obj.Hnm && obj.Pid) {
+                // Lifecycle packet (DIED/SHUTDOWN/STARTUP) — no Tid, route directly
+                queue.push(obj);
+              }
             }
           }
         } catch (e) {
@@ -203,44 +238,13 @@ export default function App() {
       for (const obj of batch) {
         const tid = obj.Tid;
         const status = (obj.Status || "").toLowerCase();
-        const existing = m.get(tid);
         const isTerminal = status === "success" || status === "failed" || status === "error" || status === "failure";
+        const isLifecycle = status === "died" || status === "shutdown" || status === "startup";
 
-        if (!existing) {
-          const txn: ActiveTxn = {
-            tid,
-            firstSeenAt: now,
-            lastUpdateAt: now,
-            lastMsg: obj,
-            messages: [obj],
-          };
-          if (isTerminal) {
-            txn.endAt = now;
-            txn.finalStatus = status;
-          }
-          m.set(tid, txn);
-        } else {
-          existing.lastUpdateAt = now;
-          existing.lastMsg = obj;
-          const msgs = existing.messages || [];
-          msgs.push(obj);
-          const MAX_HISTORY = 100;
-          if (msgs.length > MAX_HISTORY) msgs.shift();
-          existing.messages = msgs;
-
-          if (isTerminal) {
-            if (!existing.endAt) existing.endAt = now;
-            existing.finalStatus = status;
-          }
-          m.set(tid, existing);
-        }
-
-        // Mirror into serverActives keyed by "Hnm:Pid" — one stable slot per process, never purged
-        if (obj.Hnm && (obj.Pid ?? 0) > 0) {
-          const procKey = `${obj.Hnm}:${obj.Pid}`;
-          const sexisting = s.get(procKey);
-          if (!sexisting || tid !== sexisting.tid) {
-            // New transaction for this process — reset slot with fresh txn
+        // Lifecycle packets (DIED/SHUTDOWN/STARTUP) have no Tid — only update serverActives
+        if (!isLifecycle) {
+          const existing = m.get(tid);
+          if (!existing) {
             const txn: ActiveTxn = {
               tid,
               firstSeenAt: now,
@@ -248,14 +252,81 @@ export default function App() {
               lastMsg: obj,
               messages: [obj],
             };
-            if (isTerminal) { txn.endAt = now; txn.finalStatus = status; }
-            s.set(procKey, txn);
+            if (isTerminal) {
+              txn.endAt = now;
+              txn.finalStatus = status;
+            }
+            m.set(tid, txn);
           } else {
-            // Same transaction still in progress — update it
-            sexisting.lastUpdateAt = now;
-            sexisting.lastMsg = obj;
-            if (isTerminal && !sexisting.endAt) { sexisting.endAt = now; sexisting.finalStatus = status; }
-            s.set(procKey, sexisting);
+            existing.lastUpdateAt = now;
+            existing.lastMsg = obj;
+            const msgs = existing.messages || [];
+            msgs.push(obj);
+            const MAX_HISTORY = 100;
+            if (msgs.length > MAX_HISTORY) msgs.shift();
+            existing.messages = msgs;
+            if (isTerminal) {
+              if (!existing.endAt) existing.endAt = now;
+              existing.finalStatus = status;
+            }
+            m.set(tid, existing);
+          }
+        }
+
+        // Mirror into serverActives keyed by "Hnm:Pid" — one stable slot per process, never purged
+        if (obj.Hnm && (obj.Pid ?? 0) > 0) {
+          const procKey = `${obj.Hnm}:${obj.Pid}`;
+          const sexisting = s.get(procKey);
+
+          if (isLifecycle) {
+            if (sexisting) {
+              // Stamp only Status onto existing lastMsg — preserve Eid and all other fields
+              sexisting.lastUpdateAt = now;
+              sexisting.lastMsg = { ...sexisting.lastMsg, Status: obj.Status };
+              s.set(procKey, sexisting);
+            }
+            // If no existing slot, ignore — nothing to mark
+          } else {
+            const prevEnded = sexisting?.endAt !== undefined;
+            const isNewTxn = !sexisting || prevEnded;
+
+            if (isNewTxn) {
+              // New transaction for this process — increment counter and record timestamp
+              procTxnCountRef.current.set(procKey, (procTxnCountRef.current.get(procKey) ?? 0) + 1);
+              const times = procTxnTimesRef.current.get(procKey) ?? [];
+              times.push(now);
+              procTxnTimesRef.current.set(procKey, times);
+              const intervals = procBusyIntervalsRef.current.get(procKey) ?? [];
+              if (isTerminal) {
+                intervals.push({ start: now, end: now });
+              } else {
+                intervals.push({ start: now });
+              }
+              procBusyIntervalsRef.current.set(procKey, intervals);
+              const txn: ActiveTxn = {
+                tid,
+                firstSeenAt: now,
+                lastUpdateAt: now,
+                lastMsg: obj,
+                messages: [obj],
+              };
+              if (isTerminal) { txn.endAt = now; txn.finalStatus = status; }
+              s.set(procKey, txn);
+            } else {
+              // Continuing transaction — update slot
+              sexisting.lastUpdateAt = now;
+              sexisting.lastMsg = obj;
+              if (isTerminal && !sexisting.endAt) {
+                sexisting.endAt = now;
+                sexisting.finalStatus = status;
+                const intervals = procBusyIntervalsRef.current.get(procKey);
+                if (intervals?.length) {
+                  const last = intervals[intervals.length - 1]!;
+                  if (!last.end) last.end = now;
+                }
+              }
+              s.set(procKey, sexisting);
+            }
           }
           changed = true;
         }
@@ -282,7 +353,7 @@ export default function App() {
         const windowMs = 10_000;
         const arr = messageTimesRef.current;
         const cutoff = now - windowMs;
-        while (arr.length && arr[0] < cutoff) arr.shift();
+        while (arr.length && arr[0]! < cutoff) arr.shift();
         return arr.length / (windowMs / 1000);
       });
     }, 200);
@@ -378,12 +449,43 @@ export default function App() {
           .map(([eid, byPid]) => ({
             eid,
             procs: Array.from(byPid.entries())
-              .map(([pid, txn]) => ({ pid, txn })),
+              .map(([pid, txn]) => {
+                const procKey = `${host}:${pid}`;
+                const times = procTxnTimesRef.current.get(procKey) ?? [];
+                const tpsCutoff = now - 10_000;
+                const recent = times.filter(t => t >= tpsCutoff);
+                procTxnTimesRef.current.set(procKey, recent);
+                const tps = recent.length / 10;
+
+                const allIntervals = procBusyIntervalsRef.current.get(procKey) ?? [];
+                // Window start = earliest of: busyWindowMs ago OR start of busyWindowTxns-th-most-recent interval
+                const tenthStart = allIntervals.length >= busyWindowTxns
+                  ? allIntervals[allIntervals.length - busyWindowTxns]!.start
+                  : allIntervals[0]?.start ?? now;
+                const busyCutoff = Math.min(now - busyWindowMs, tenthStart);
+                const trimmedIntervals = allIntervals.filter(iv => (iv.end ?? now) >= busyCutoff);
+                procBusyIntervalsRef.current.set(procKey, trimmedIntervals);
+                const windowMs = now - busyCutoff;
+                const busyMs = trimmedIntervals.reduce((sum, iv) => {
+                  const s = Math.max(iv.start, busyCutoff);
+                  const e = iv.end ?? now;
+                  return sum + Math.max(0, e - s);
+                }, 0);
+                const busyPct = Math.round(busyMs / windowMs * 10000) / 100;
+
+                return {
+                  pid,
+                  txn,
+                  txnCount: procTxnCountRef.current.get(procKey) ?? 0,
+                  tps,
+                  busyPct,
+                };
+              }),
           }))
           .sort((a, b) => a.eid.localeCompare(b.eid)),
       }))
       .sort((a, b) => a.host.localeCompare(b.host));
-  }, [serverActives, groupBy]);
+  }, [serverActives, groupBy, serverTick, busyWindowMs, busyWindowTxns]);
 
   const longest = activeList[0];
 
@@ -488,6 +590,9 @@ export default function App() {
                       group={{ host: g.host, eids: [{ eid: row.label, procs: allProcs }] }}
                       thresholdSeconds={thresholdSeconds}
                       staleSecs={staleMinutes * 60}
+                      tpsInnerDotThreshold={tpsInnerDotThreshold}
+                      busyPctInnerDotThreshold={busyPctInnerDotThreshold}
+                      busyLingerMs={busyLingerMs}
                     />
                   )}
                 </div>
@@ -515,7 +620,6 @@ export default function App() {
         </div>
       )}
       <div className="app-container">
-
         <div className="app-header">
           <section className="card card-summary">
             <div className="header-left">
@@ -582,6 +686,13 @@ export default function App() {
               <div style={{ marginLeft: "auto" }} />
               <button
                 className="btn btn-secondary"
+                onClick={() => { setShowSettings((v) => !v); setShowClients(false); }}
+                title="Settings"
+              >
+                ⚙
+              </button>
+              <button
+                className="btn btn-secondary"
                 onClick={() => setDarkMode((v) => !v)}
                 title="Toggle dark mode"
               >
@@ -630,6 +741,7 @@ export default function App() {
           </div>
         </div>
 
+        <div className="app-body">
         <section className="txn-list">
           {groupBy === "drilldown" && activeDrilldown ? (() => {
             const label = activeDrilldown;
@@ -679,9 +791,48 @@ export default function App() {
             ))
           )}
         </section>
-      </div>
+        {showSettings && (
+          <SettingsPanel
+            thresholdSeconds={thresholdSeconds} setThresholdSeconds={setThresholdSeconds}
+            staleMinutes={staleMinutes} setStaleMinutes={setStaleMinutes}
+            lingerSeconds={lingerSeconds} setLingerSeconds={setLingerSeconds}
+            autoRemoveOnEnd={autoRemoveOnEnd} setAutoRemoveOnEnd={setAutoRemoveOnEnd}
+            tpsInnerDotThreshold={tpsInnerDotThreshold} setTpsInnerDotThreshold={setTpsInnerDotThreshold}
+            busyPctInnerDotThreshold={busyPctInnerDotThreshold} setBusyPctInnerDotThreshold={setBusyPctInnerDotThreshold}
+            busyLingerMs={busyLingerMs} setBusyLingerMs={setBusyLingerMs}
+            busyWindowMs={busyWindowMs} setBusyWindowMs={setBusyWindowMs}
+            busyWindowTxns={busyWindowTxns} setBusyWindowTxns={setBusyWindowTxns}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
+        {showClients && (
+          <div className="settings-panel">
+            <div className="settings-header">
+              <span className="settings-title">Connected clients</span>
+              <button className="btn-icon" onClick={() => setShowClients(false)}>✕</button>
+            </div>
+            {(serverStats?.client_ips ?? []).length === 0 ? (
+              <div style={{ padding: "16px", fontSize: 13, color: "var(--text-muted)" }}>No client IP data yet</div>
+            ) : (
+              <ul className="clients-list">
+                {(serverStats?.client_ips ?? []).map((ip) => {
+                  const isMe = ip === serverStats?.my_ip;
+                  return (
+                    <li key={ip} className={`clients-list-ip${isMe ? " clients-list-ip-me" : ""}`}>
+                      <span className={`clients-list-dot${isMe ? " clients-list-dot-me" : ""}`} />
+                      <span className="clients-list-addr">{ip}</span>
+                      {isMe && <span className="clients-me-badge">you</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+        </div>{/* app-body */}
+      </div>{/* app-container */}
 
-      {serverStats && <StatsOverlay stats={serverStats} />}
+      {serverStats && <StatsOverlay stats={serverStats} onClick={() => { setShowClients((v) => !v); setShowSettings(false); }} />}
     </div>
   );
 }

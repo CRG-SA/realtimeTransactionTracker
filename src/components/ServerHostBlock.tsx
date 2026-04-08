@@ -2,13 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import type { ActiveTxn } from "../types";
 import { human } from "../utils";
 
-type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number } };
+type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number }; txnCount?: number; tps?: number; busyPct?: number };
 type EidGroup = { eid: string; procs: ProcEntry[] };
 type ServerGroup = { host: string; eids: EidGroup[] };
 
-const BUSY_LINGER_MS = 500;
-
-function ProcDot({ pid, txn, staleSecs }: { pid: number; txn: ActiveTxn & { durationMs: number }; staleSecs: number }) {
+function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThreshold, busyPctInnerDotThreshold, busyLingerMs }: {
+  pid: number;
+  txn: ActiveTxn & { durationMs: number };
+  staleSecs: number;
+  txnCount: number;
+  tps: number;
+  busyPct: number;
+  tpsInnerDotThreshold: number;
+  busyPctInnerDotThreshold: number;
+  busyLingerMs: number;
+}) {
   const STALE_MS = staleSecs * 1000;
   const rawBusy = !txn.finalStatus;
   const [busy, setBusy] = useState(rawBusy);
@@ -26,13 +34,13 @@ function ProcDot({ pid, txn, staleSecs }: { pid: number; txn: ActiveTxn & { dura
       if (lingerTimer.current) clearTimeout(lingerTimer.current);
       setBusy(true);
     } else {
-      lingerTimer.current = setTimeout(() => setBusy(false), BUSY_LINGER_MS);
+      lingerTimer.current = setTimeout(() => setBusy(false), busyLingerMs);
     }
 
     return () => {
       if (lingerTimer.current) clearTimeout(lingerTimer.current);
     };
-  }, [rawBusy]);
+  }, [rawBusy, busyLingerMs]);
 
   useEffect(() => {
     setStale(Date.now() - txn.lastUpdateAt > STALE_MS);
@@ -43,16 +51,22 @@ function ProcDot({ pid, txn, staleSecs }: { pid: number; txn: ActiveTxn & { dura
     return () => clearInterval(id);
   }, [txn.lastUpdateAt, staleSecs]);
 
-  const dotClass = stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
+  const statusUp = (msg.Status ?? "").toUpperCase();
+  const isDied = statusUp === "DIED";
+  const isShutdown = statusUp === "SHUTDOWN";
+  const hasError = statusUp === "ERROR";
+  const dotClass = isDied || isShutdown ? "dot-dead" : stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
 
   return (
     <div className="proc-dot-wrap">
       <div
-        className={`server-proc-dot ${dotClass}`}
+        className={`server-proc-dot ${dotClass}${hasError || isDied ? " dot-error-ring" : ""}`}
         onMouseEnter={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
         onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
         onMouseLeave={() => setMousePos(null)}
-      />
+      >
+        {(tps > tpsInnerDotThreshold || busyPct > busyPctInnerDotThreshold) && <div className="dot-high-tps" />}
+      </div>
       {mousePos && (
         <div className="proc-dot-popup" style={{ left: mousePos.x + 12, top: mousePos.y - 8 }}>
           <div className="proc-dot-popup-row proc-dot-popup-title">
@@ -68,6 +82,9 @@ function ProcDot({ pid, txn, staleSecs }: { pid: number; txn: ActiveTxn & { dura
           {msg.Fid && <div className="proc-dot-popup-row"><span className="proc-dot-key">Fid</span><span className="proc-dot-val">{msg.Fid}</span></div>}
           {msg.Uid && <div className="proc-dot-popup-row"><span className="proc-dot-key">Uid</span><span className="proc-dot-val">{msg.Uid}</span></div>}
           {msg.Msg && <div className="proc-dot-popup-row"><span className="proc-dot-key">Msg</span><span className="proc-dot-val">{msg.Msg}</span></div>}
+          <div className="proc-dot-popup-row"><span className="proc-dot-key">Txns</span><span className="proc-dot-val">{txnCount.toLocaleString()}</span></div>
+          <div className="proc-dot-popup-row"><span className="proc-dot-key">Tx/s</span><span className="proc-dot-val">{tps.toFixed(1)}</span></div>
+          <div className="proc-dot-popup-row"><span className="proc-dot-key">%Busy</span><span className="proc-dot-val">{busyPct.toFixed(2)}%</span></div>
           <div className="proc-dot-popup-row"><span className="proc-dot-key">First seen</span><span className="proc-dot-val">{new Date(txn.firstSeenAt).toLocaleTimeString()}</span></div>
           <div className="proc-dot-popup-row"><span className="proc-dot-key">Duration</span><span className="proc-dot-val">{human(txn.durationMs)}</span></div>
         </div>
@@ -76,13 +93,32 @@ function ProcDot({ pid, txn, staleSecs }: { pid: number; txn: ActiveTxn & { dura
   );
 }
 
-export function ServerHostBlock({ group, thresholdSeconds: _thresholdSeconds, onClick, staleSecs }: { group: ServerGroup; thresholdSeconds: number; onClick?: () => void; staleSecs: number }) {
+export function ServerHostBlock({ group, thresholdSeconds: _thresholdSeconds, onClick, staleSecs, tpsInnerDotThreshold, busyPctInnerDotThreshold, busyLingerMs }: {
+  group: ServerGroup;
+  thresholdSeconds: number;
+  onClick?: () => void;
+  staleSecs: number;
+  tpsInnerDotThreshold: number;
+  busyPctInnerDotThreshold: number;
+  busyLingerMs: number;
+}) {
   const { eids } = group;
 
   return (
     <div className="server-proc-dots" onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined}>
-      {eids[0]?.procs.map(({ pid, txn }) => (
-        <ProcDot key={pid} pid={pid} txn={txn} staleSecs={staleSecs} />
+      {eids[0]?.procs.map(({ pid, txn, txnCount, tps, busyPct }) => (
+        <ProcDot
+          key={pid}
+          pid={pid}
+          txn={txn}
+          staleSecs={staleSecs}
+          txnCount={txnCount ?? 0}
+          tps={tps ?? 0}
+          busyPct={busyPct ?? 0}
+          tpsInnerDotThreshold={tpsInnerDotThreshold}
+          busyPctInnerDotThreshold={busyPctInnerDotThreshold}
+          busyLingerMs={busyLingerMs}
+        />
       ))}
     </div>
   );

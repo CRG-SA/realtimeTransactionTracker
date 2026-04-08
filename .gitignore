@@ -31,3 +31,4 @@ dist/
 public/config.json
 
 dirty-files*
+udpSock.json

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # python3 -m venv venv && ./venv/bin/pip install uvloop orjson websockets
-# UDP_PORT=20005 WS_PORT=9000 ./venv/bin/python udpSock.py
+# UDP_PORT=20000 WS_PORT=8000 ./venv/bin/python udpSock.py
 
 # pkts/s: Average UDP packets received per second over the last 5 seconds.
 # RX: Total cumulative UDP packets received since the server started.
@@ -292,6 +292,10 @@ async def stats_reporter():
             if q is None:
                 continue
             drop_total = client_ws_drops.get(ws, 0)
+            my_ip = ws.remote_address[0] if ws.remote_address else "unknown"
+            all_ips = sorted(set(
+                c.remote_address[0] for c in connected_clients if c.remote_address
+            ))
             stats_obj = {
                 "_type": "stats",
                 "_ts_ms": int(now * 1000),
@@ -302,6 +306,8 @@ async def stats_reporter():
                 "ws_drop_total": drop_total,
                 "q_size": q.qsize(),
                 "clients": client_count,
+                "client_ips": all_ips,
+                "my_ip": my_ip,
             }
             try:
                 q.put_nowait(stats_obj)

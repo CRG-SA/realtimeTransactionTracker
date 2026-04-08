@@ -30,6 +30,18 @@ export type ActiveTxn = {
 export type AppConfig = {
   wsPort: number;
   wsHost?: string;
+  // Display thresholds
+  thresholdSeconds?: number;
+  staleMinutes?: number;
+  lingerSeconds?: number;
+  autoRemoveOnEnd?: boolean;
+  // Robot tab dot indicators
+  tpsInnerDotThreshold?: number;
+  busyPctInnerDotThreshold?: number;
+  busyLingerMs?: number;
+  // Busy % calculation window
+  busyWindowMs?: number;
+  busyWindowTxns?: number;
 };
 
 export type ServerStats = {
@@ -40,4 +52,6 @@ export type ServerStats = {
   ws_drop_total: number;
   q_size: number;
   clients: number;
+  client_ips?: string[];
+  my_ip?: string;
 };
