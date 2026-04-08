@@ -48,6 +48,7 @@ export default function App() {
   const [editingGroups, setEditingGroups] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showClients, setShowClients] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [drilldownTabs, setDrilldownTabs] = useState<string[]>([]);
   const [activeDrilldown, setActiveDrilldown] = useState<string | null>(null);
   const [eidGroupDefs, setEidGroupDefs] = useState<{ name: string; pattern: string }[]>(() => {
@@ -686,7 +687,14 @@ export default function App() {
               <div style={{ marginLeft: "auto" }} />
               <button
                 className="btn btn-secondary"
-                onClick={() => { setShowSettings((v) => !v); setShowClients(false); }}
+                onClick={() => { setShowInfo((v) => !v); setShowSettings(false); setShowClients(false); }}
+                title="Info"
+              >
+                ℹ️
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => { setShowSettings((v) => !v); setShowClients(false); setShowInfo(false); }}
                 title="Settings"
               >
                 ⚙
@@ -826,6 +834,114 @@ export default function App() {
                   );
                 })}
               </ul>
+            )}
+          </div>
+        )}
+        {showInfo && (
+          <div className="settings-panel">
+            <div className="settings-header">
+              <span className="settings-title">Rules</span>
+              <button className="btn-icon" onClick={() => setShowInfo(false)}>✕</button>
+            </div>
+            {groupBy === "servers" ? (
+              <div className="info-content">
+                <div className="info-section">
+                  <div className="info-section-title">Process Dot Colors (Robot Tab)</div>
+                  <div className="info-rule">
+                    <span className="info-dot" style={{ background: "#22c55e" }} />
+                    <span><strong>Green (Idle):</strong> Process is running, no active transactions</span>
+                  </div>
+                  <div className="info-rule">
+                    <span className="info-dot" style={{ background: "#ef4444" }} />
+                    <span><strong>Red (Busy):</strong> Process has active transactions in flight</span>
+                  </div>
+                  <div className="info-rule">
+                    <span className="info-dot" style={{ background: "#166534" }} />
+                    <span><strong>Dark Green (Stale):</strong> Process hasn't sent data for {staleMinutes} minute{staleMinutes !== 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="info-rule">
+                    <span className="info-dot" style={{ background: "#9ca3af" }} />
+                    <span><strong>Grey (Dead):</strong> Process has shut down or died</span>
+                  </div>
+                </div>
+                <div className="info-section">
+                  <div className="info-section-title">Special Indicators</div>
+                  <div className="info-rule">
+                    <span className="info-ring" style={{ boxShadow: "0 0 0 2px rgba(239, 68, 68, 0.9), 0 0 8px 2px rgba(239, 68, 68, 0.7)" }} />
+                    <span><strong>Red Shadow Ring:</strong> Last transaction ended with ERROR status</span>
+                  </div>
+                  <div className="info-rule">
+                    <span className="info-dot" style={{ background: "#f97316", boxShadow: "0 0 3px rgba(249, 115, 22, 0.9)" }} />
+                    <span><strong>Orange Inner Dot:</strong> High transaction rate (Tx/s ≥ {tpsInnerDotThreshold}) or busy threshold exceeded</span>
+                  </div>
+                </div>
+              </div>
+            ) : groupBy === "tid" ? (
+              <div className="info-content">
+                <div className="info-section">
+                  <div className="info-section-title">Transaction ID (TID) View</div>
+                  <div className="info-rule">
+                    <span><strong>Each row:</strong> A unique transaction identified by its TID</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Duration:</strong> Time from first packet to last packet (or end of linger period)</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Status indicator:</strong> Shows transaction state (running, success, error, failed)</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Filter:</strong> Search by TID, Eid, Fid, Uid, hostname, Status, message type, or message content</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Show if ≥:</strong> Hide transactions shorter than threshold duration</span>
+                  </div>
+                </div>
+              </div>
+            ) : groupBy === "bid" ? (
+              <div className="info-content">
+                <div className="info-section">
+                  <div className="info-section-title">Business ID (BID) View</div>
+                  <div className="info-rule">
+                    <span><strong>Groups transactions:</strong> All transactions for the same BID are collected</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Longest duration:</strong> Displayed for each BID group to show slowest transaction</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Expand/collapse:</strong> Click BID to show/hide all transactions in that group</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Hide BID:</strong> Right-click or use menu to hide specific BIDs; use "Clear" to restore</span>
+                  </div>
+                </div>
+              </div>
+            ) : groupBy === "drilldown" ? (
+              <div className="info-content">
+                <div className="info-section">
+                  <div className="info-section-title">Process Drilldown View</div>
+                  <div className="info-rule">
+                    <span><strong>Host columns:</strong> Each column represents one server host</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Each row:</strong> A process identified by EID (Enterprise ID)</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Columns show:</strong> PID, Transaction count, Tx/s, %Busy, latest TID, Status, Mtp, Fid, Uid, first seen time, duration, and message</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Status dots:</strong> Green (idle), Red (busy), Dark Green (stale), Grey (dead)</span>
+                  </div>
+                  <div className="info-rule">
+                    <span><strong>Resize columns:</strong> Drag column borders to adjust widths</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="info-content">
+                <div style={{ padding: "16px", fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
+                  Info available for all views
+                </div>
+              </div>
             )}
           </div>
         )}

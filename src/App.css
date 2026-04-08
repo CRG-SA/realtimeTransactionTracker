@@ -749,6 +749,53 @@ body {
   background: #14532d;
 }
 
+.info-content {
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.info-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.info-section:last-child {
+  border-bottom: none;
+}
+
+.info-section-title {
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.info-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  line-height: 1.4;
+}
+
+.info-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.info-ring {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #22c55e;
+}
+
 .stats-overlay {
   position: fixed;
   top: 8px;
