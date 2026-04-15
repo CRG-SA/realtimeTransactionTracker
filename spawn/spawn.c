@@ -21,6 +21,10 @@ files. */
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <assert.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 
 #include "spawn.h"
 #include "spawn_version.h"
@@ -331,6 +335,69 @@ struct process {
 
 struct process *process_list = NULL;
 
+static void
+send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus)
+{
+    const char *host = getenv ("TELEMETRY_HOST");
+    const char *port_str = getenv ("TELEMETRY_PORT");
+    struct sockaddr_in addr;
+    int sock;
+    char json_payload[512];
+    char die_fields[128];
+    struct hostent *he;
+    int port;
+
+    if (!host || !port_str)
+        return;
+
+    port = atoi (port_str);
+    if (port <= 0 || port > 65535)
+        return;
+
+    sock = socket (AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        log_fmt (logfile, errno, "telemetry: socket creation failed");
+        return;
+    }
+
+    he = gethostbyname (host);
+    if (!he) {
+        log_fmt (logfile, errno, "telemetry: could not resolve %s", host);
+        close (sock);
+        return;
+    }
+
+    memset (&addr, 0, sizeof (addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons (port);
+    memcpy (&addr.sin_addr, he->h_addr_list[0], he->h_length);
+
+    die_fields[0] = '\0';
+    if (has_wstatus) {
+        if (WIFEXITED (wstatus))
+            snprintf (die_fields, sizeof (die_fields),
+                      ",\"DieReason\":\"exit\",\"ExitCode\":%d",
+                      (int) WEXITSTATUS (wstatus));
+        else
+            snprintf (die_fields, sizeof (die_fields),
+                      ",\"DieReason\":\"signal\",\"Signal\":%d",
+                      (int) WTERMSIG (wstatus));
+    }
+
+    snprintf (json_payload, sizeof (json_payload),
+              "{\"Status\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\"%s}",
+              status, hostname, (long) pid, die_fields);
+
+    if (sendto (sock, json_payload, strlen (json_payload), 0,
+                (struct sockaddr *) &addr, sizeof (addr)) < 0) {
+        log_fmt (logfile, errno, "telemetry: sendto failed for host %s:%d", host, port);
+    } else if (option_verbose) {
+        log_fmt (logfile, 0, "telemetry: sent %s for pid %ld to %s:%d", status, (long) pid, host, port);
+    }
+
+    close (sock);
+}
+
 static int
 spawn (struct process *p)
 {
@@ -351,6 +418,7 @@ spawn (struct process *p)
         log_perror (p->path);
         return 1;
     }
+    send_telemetry_udp ("STARTUP", p->pid, 0, 0);
     CHANGE_STATE (p, LIFE_STATE_WAITING_FOR_SIGCHLD);
     return 0;
 }
@@ -952,10 +1020,11 @@ response from select(). */
                 if (WIFEXITED (p->status)) {
                     sprintf (s, "exit code %d", (int) WEXITSTATUS (p->status));
                 } else {
-                    sprintf (s, "on signal %d", (int) WTERMSIG (p->status));
+                    sprintf (s, "signal %d", (int) WTERMSIG (p->status));
                 }
                 log_fmt (logfile, 0, "child %s died, pid = %ld, %s, uptime = %lds", p->name, (long) p->pid,
                          s, (long) (t - p->start_time));
+                send_telemetry_udp ("DIED", p->pid, p->status, p->got_status);
                 if (!WIFEXITED (p->status))
                     analize_core_file (p);
                 unlink (p->sym_link);
