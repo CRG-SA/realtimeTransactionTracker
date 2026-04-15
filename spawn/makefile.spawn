@@ -1,0 +1,16 @@
+
+include ../../../util/makefile/makefile.vars
+
+SOURCES = spawn.c
+HEADERS = 
+EXECUTE	= spawn
+TARGET	= $(EXECUTE)
+DEST	= $(DBIN)
+
+USER_LIB = 
+LIBS = 
+EXTERN_LIB = 
+
+NO_GLOBAL_LIBS=1
+include ../../../util/makefile/makefile.compile
+
