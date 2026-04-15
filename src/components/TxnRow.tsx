@@ -71,15 +71,35 @@ export const TxnRow = React.memo(({
           )}
 
           {isExpanded && txn.messages && txn.messages.length > 0 && (
-            <div className="txn-history">
-              {txn.messages.map((m, idx) => (
-                <div key={idx} className="txn-history-row">
-                  <span className="txn-history-time">{m.Uxt || ""}</span>
-                  {m.Status && <span className="txn-history-status">{m.Status}</span>}
-                  {m.Mtp && <span className="txn-history-mtp">{m.Mtp}</span>}
-                  {m.Msg && <span className="txn-history-msg" title={m.Msg}>{m.Msg}</span>}
-                </div>
-              ))}
+            <div className="txn-history" onClick={(e) => e.stopPropagation()}>
+              <table className="txn-history-table">
+                <thead>
+                  <tr>
+                    <th className="txn-history-th txn-history-th-time">Time</th>
+                    <th className="txn-history-th txn-history-th-severity">Severity</th>
+                    <th className="txn-history-th txn-history-th-status">Status</th>
+                    <th className="txn-history-th txn-history-th-mtp">Mtp</th>
+                    <th className="txn-history-th txn-history-th-fid">Fid</th>
+                    <th className="txn-history-th txn-history-th-uid">Uid</th>
+                    <th className="txn-history-th txn-history-th-ret">Ret</th>
+                    <th className="txn-history-th txn-history-th-message">Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txn.messages.map((m, idx) => (
+                    <tr key={idx} className="txn-history-row">
+                      <td className="txn-history-td txn-history-td-time">{m.Uxt || "—"}</td>
+                      <td className="txn-history-td txn-history-td-severity">{m.Severity || "—"}</td>
+                      <td className="txn-history-td txn-history-td-status">{m.Status || "—"}</td>
+                      <td className="txn-history-td txn-history-td-mtp">{m.Mtp || "—"}</td>
+                      <td className="txn-history-td txn-history-td-fid" title={m.Fid || ""}>{m.Fid || "—"}</td>
+                      <td className="txn-history-td txn-history-td-uid" title={m.Uid || ""}>{m.Uid || "—"}</td>
+                      <td className="txn-history-td txn-history-td-ret">{m.Ret !== undefined ? m.Ret : "—"}</td>
+                      <td className="txn-history-td txn-history-td-message" title={m.Msg || ""}>{m.Msg || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

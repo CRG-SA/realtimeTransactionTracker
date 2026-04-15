@@ -643,56 +643,104 @@ body {
   gap: 4px;
 }
 
-.txn-history-row {
-  font-size: 12px;
-  color: var(--text-history-row);
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  flex-wrap: wrap;
+.txn-history {
+  margin-top: 12px;
+  border: 1px solid var(--border-card);
+  border-radius: 4px;
+  overflow-x: auto;
 }
 
-.txn-history-time {
+.txn-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  table-layout: auto;
+}
+
+.txn-history-th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-card);
+  white-space: nowrap;
+  background: var(--bg-card-alt);
+}
+
+.txn-history-th-time { width: 120px; }
+.txn-history-th-severity { width: 70px; }
+.txn-history-th-status { width: 70px; }
+.txn-history-th-mtp { width: 70px; }
+.txn-history-th-fid { width: 70px; }
+.txn-history-th-uid { width: 70px; }
+.txn-history-th-ret { width: 50px; }
+.txn-history-th-message { flex: 1; }
+
+.txn-history-row {
+  border-bottom: 1px solid var(--border-server-cell);
+}
+
+.txn-history-row:nth-child(even) {
+  background: var(--bg-card-alt);
+}
+
+.txn-history-row:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.txn-history-td {
+  padding: 5px 8px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
   font-size: 11px;
+}
+
+.txn-history-td-time {
+  width: 120px;
   color: var(--text-history-time);
-  min-width: 80px;
 }
 
-.txn-history-status {
-  font-weight: 600;
-  font-size: 11px;
-  padding: 2px 0;
-  border-radius: 999px;
-  background: var(--bg-history-status);
-  color: var(--text-badge-muted);
-  width: 58px;
-  text-align: center;
-  flex-shrink: 0;
-  display: inline-block;
-}
-
-.txn-history-mtp {
-  font-size: 11px;
-  padding: 2px 0;
-  border-radius: 999px;
-  background: var(--bg-history-mtp);
-  color: var(--text-history-mtp);
-  width: 80px;
-  text-align: center;
-  flex-shrink: 0;
-  display: inline-block;
-}
-
-.txn-history-msg {
+.txn-history-td-severity {
+  width: 70px;
   color: var(--text-secondary);
-  font-size: 11px;
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.txn-history-td-status {
+  width: 70px;
+  color: var(--text-secondary);
+}
+
+.txn-history-td-mtp {
+  width: 70px;
+  color: var(--text-history-mtp);
+}
+
+.txn-history-td-fid {
+  width: 70px;
+  color: var(--text-secondary);
+}
+
+.txn-history-td-uid {
+  width: 70px;
+  color: var(--text-secondary);
+}
+
+.txn-history-td-ret {
+  width: 50px;
+  color: var(--text-secondary);
+}
+
+.txn-history-td-message {
+  color: var(--text-txn-message);
+  word-break: break-word;
 }
 /* ---- Stats Overlay ---- */
 .clients-list {
@@ -1155,6 +1203,83 @@ body {
 .status-died     { color: #f87171; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
 .status-shutdown { color: #9ca3af; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
 
+.proc-context-menu {
+  position: fixed;
+  background: #0f172a;
+  border-radius: 10px;
+  z-index: 10000;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.08);
+  overflow: hidden;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  max-height: 500px;
+}
+
+.proc-context-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  flex-shrink: 0;
+}
+
+.proc-context-title {
+  font-weight: 700;
+  font-size: 12px;
+  color: #f1f5f9;
+}
+
+.proc-context-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.proc-context-close:hover {
+  color: #f1f5f9;
+}
+
+.proc-context-content {
+  padding: 10px 12px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.proc-context-restart-btn {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.proc-context-restart-btn:hover {
+  background: rgba(239, 68, 68, 0.35);
+  color: #fff;
+}
+
 .server-proc-dot {
   width: 10px;
   height: 10px;
@@ -1368,6 +1493,191 @@ body {
 
 .dd-msg {
   color: var(--text-txn-message);
+}
+
+/* ---- Logs Table ---- */
+.logs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-card);
+  height: 400px;
+}
+
+.logs-header {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-server-host);
+  padding: 4px 0 8px 0;
+  flex-shrink: 0;
+}
+
+.logs-empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logs-table-wrapper {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border-card);
+  border-radius: 4px;
+}
+
+.logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  table-layout: fixed;
+  position: relative;
+}
+
+.logs-th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0;
+  border-bottom: 1px solid var(--border-card);
+  white-space: nowrap;
+  background: var(--bg-card-alt);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  overflow: visible;
+}
+
+.logs-th-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  gap: 4px;
+}
+
+.logs-resize-handle {
+  width: 6px;
+  min-width: 6px;
+  cursor: col-resize;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.3;
+  user-select: none;
+}
+
+.logs-resize-handle::after {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 12px;
+  background: var(--text-secondary);
+  border-radius: 1px;
+}
+
+.logs-resize-handle:hover {
+  opacity: 1;
+}
+
+.logs-th-time {
+  width: 90px;
+  flex-shrink: 0;
+}
+
+.logs-th-tid {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+.logs-th-severity {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.logs-th-status {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.logs-th-message {
+  flex: 1;
+  min-width: 200px;
+}
+
+.logs-tr {
+  border-bottom: 1px solid var(--border-server-cell);
+}
+
+.logs-tr:nth-child(even) {
+  background: var(--bg-card-alt);
+}
+
+.logs-tr:hover {
+  background: var(--bg-server-cell-hover);
+}
+
+.logs-td {
+  padding: 5px 8px 5px 6px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-server-cell);
+  max-width: 0;
+}
+
+.logs-td-time {
+  color: var(--text-history-time);
+}
+
+.logs-td-tid {
+  color: var(--text-secondary);
+}
+
+.logs-td-severity {
+  color: var(--text-secondary);
+}
+
+.logs-td-status {
+  color: var(--text-secondary);
+}
+
+.logs-td-message {
+  color: var(--text-txn-message);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.logs-th-mtp,
+.logs-th-fid,
+.logs-th-uid,
+.logs-th-ret,
+.logs-th-mem {
+  width: 70px;
+}
+
+.logs-td-mtp,
+.logs-td-fid,
+.logs-td-uid,
+.logs-td-ret,
+.logs-td-mem {
+  width: 70px;
 }
 
 /* ---- Settings Panel ---- */

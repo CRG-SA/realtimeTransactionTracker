@@ -262,7 +262,7 @@ export default function App() {
             existing.lastUpdateAt = now;
             existing.lastMsg = obj;
             const msgs = existing.messages || [];
-            msgs.push(obj);
+            msgs.push({ ...obj, _receivedAt: now } as any);
             const MAX_HISTORY = 100;
             if (msgs.length > MAX_HISTORY) msgs.shift();
             existing.messages = msgs;
@@ -309,7 +309,7 @@ export default function App() {
                 firstSeenAt: now,
                 lastUpdateAt: now,
                 lastMsg: obj,
-                messages: [obj],
+                messages: [{ ...obj, _receivedAt: now } as any],
               };
               if (isTerminal) { txn.endAt = now; txn.finalStatus = status; }
               s.set(procKey, txn);
@@ -317,6 +317,11 @@ export default function App() {
               // Continuing transaction — update slot
               sexisting.lastUpdateAt = now;
               sexisting.lastMsg = obj;
+              const msgs = sexisting.messages || [];
+              msgs.push({ ...obj, _receivedAt: now } as any);
+              const MAX_HISTORY = 100;
+              if (msgs.length > MAX_HISTORY) msgs.shift();
+              sexisting.messages = msgs;
               if (isTerminal && !sexisting.endAt) {
                 sexisting.endAt = now;
                 sexisting.finalStatus = status;
@@ -388,7 +393,11 @@ export default function App() {
     }));
 
     if (thresholdMs > 0) {
-      list = list.filter((t) => t.durationMs >= thresholdMs);
+      list = list.filter((t) => {
+        // Always show terminal-only transactions (no START message, just END with error/failure)
+        const isTerminalOnly = t.finalStatus && t.durationMs === 0;
+        return isTerminalOnly || t.durationMs >= thresholdMs;
+      });
     }
 
     if (filterText) {
@@ -521,6 +530,29 @@ export default function App() {
     return rows.sort((a, b) => a.label.localeCompare(b.label));
   })();
 
+  const handleProcDotClick = (host: string, pid: number, eid: string) => {
+    // Extract first part of hostname before first dot
+    const hostPrefix = host.split(".")[0];
+    const tabKey = `${hostPrefix}:${eid}:${pid}`;
+    setDrilldownTabs((prev) => prev.includes(tabKey) ? prev : [...prev, tabKey]);
+    setActiveDrilldown(tabKey);
+    setGroupBy("drilldown" as any);
+  };
+
+  const handleRestartProcess = (pid: number, hnm: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      const restartPacket = {
+        Command: "RESTART",
+        Pid: pid,
+        Hnm: hnm,
+      };
+      wsRef.current.send(JSON.stringify(restartPacket));
+      console.log(`[WS] Sent restart command for ${hnm}:${pid}`);
+    } else {
+      console.warn("WebSocket not connected, cannot send restart command");
+    }
+  };
+
   const serverGridContent = serverGroups.length === 0 ? (
     <EmptyState />
   ) : (
@@ -594,6 +626,8 @@ export default function App() {
                       tpsInnerDotThreshold={tpsInnerDotThreshold}
                       busyPctInnerDotThreshold={busyPctInnerDotThreshold}
                       busyLingerMs={busyLingerMs}
+                      onProcDotClick={(pid, eid) => handleProcDotClick(g.host, pid, eid)}
+                      onKill={handleRestartProcess}
                     />
                   )}
                 </div>
@@ -753,15 +787,34 @@ export default function App() {
         <section className="txn-list">
           {groupBy === "drilldown" && activeDrilldown ? (() => {
             const label = activeDrilldown;
-            const row = gridRows.find((r) => r.label === label);
-            const allProcs = row
-              ? serverGroups.flatMap((g) =>
-                  g.eids.filter((e) => row.eids.includes(e.eid)).flatMap((e) =>
-                    e.procs.map((p) => ({ ...p, host: g.host }))
+            // Check if it's a process-specific drilldown (format: hostPrefix:eid:pid)
+            const parts = label.split(":");
+            const isProcSpecific = parts.length === 3;
+            let allProcs;
+
+            if (isProcSpecific) {
+              const [hostPrefix, eid, pidStr] = parts;
+              const pid = Number(pidStr);
+              allProcs = serverGroups.flatMap((g) =>
+                g.host.startsWith(hostPrefix)
+                  ? g.eids.flatMap((e) =>
+                      e.eid === eid
+                        ? e.procs.filter((p) => p.pid === pid).map((p) => ({ ...p, host: g.host }))
+                        : []
+                    )
+                  : []
+              );
+            } else {
+              const row = gridRows.find((r) => r.label === label);
+              allProcs = row
+                ? serverGroups.flatMap((g) =>
+                    g.eids.filter((e) => row.eids.includes(e.eid)).flatMap((e) =>
+                      e.procs.map((p) => ({ ...p, host: g.host }))
+                    )
                   )
-                )
-              : [];
-            return <ProcessDrillDown label={label} procs={allProcs} staleSecs={staleMinutes * 60} />;
+                : [];
+            }
+            return <ProcessDrillDown label={label} procs={allProcs} staleSecs={staleMinutes * 60} onKill={handleRestartProcess} onProcDotClick={handleProcDotClick} />;
           })() : groupBy === "servers" ? (
             serverGridContent
           ) : activeList.length === 0 ? (
