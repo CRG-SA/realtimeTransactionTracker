@@ -565,9 +565,11 @@ send_coredump_telemetry_delayed (pid_t dead_pid, const char *eid, const char *fn
                        + (eid ? strlen (eid) : 0);
         json_payload = malloc (payload_size);
         if (json_payload) {
+            const char *cd_status = (coredump_esc && strstr (coredump_esc, "No coredumps found."))
+                                    ? "NOCOREDUMP" : "COREDUMP";
             snprintf (json_payload, payload_size,
-                      "{\"Status\":\"COREDUMP\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"%s/%ld\",\"Bid\":\"%s\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"%s\",\"_recv_ts_ms\":%ld}",
-                      date_str, time_str, eid ? eid : "", hostname, (long) dead_pid, fid ? fid : "", short_hostname, (long) dead_pid, bid, fnm ? fnm : "",
+                      "{\"Status\":\"%s\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"%s/%ld\",\"Bid\":\"%s\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"%s\",\"_recv_ts_ms\":%ld}",
+                      cd_status, date_str, time_str, eid ? eid : "", hostname, (long) dead_pid, fid ? fid : "", short_hostname, (long) dead_pid, bid, fnm ? fnm : "",
                       coredump_esc ? coredump_esc : "unavailable", recv_ts_ms);
             sendto (sock, json_payload, strlen (json_payload), 0,
                     (struct sockaddr *) &addr, sizeof (addr));

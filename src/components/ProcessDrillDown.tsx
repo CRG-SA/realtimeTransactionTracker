@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ActiveTxn } from "../types";
+import { computeProcState, dotClassFor, statusClassFor, statusLabelFor } from "../utils";
 
 type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number }; host?: string; txnCount?: number; tps?: number; busyPct?: number };
 
 const BUSY_LINGER_MS = 500;
 
 const DEFAULT_WIDTHS = [22, 52, 70, 50, 60, 55, 55, 180, 70, 80, 150, 80, 80, 60, 60, 260];
-const COLS = ["", "Status", "Mem", "PID", "Txns", "Tx/s", "%Busy", "Tid", "Status", "Mtp", "Fid", "Uid", "Seen", "Dur", "Idle", "Msg"];
+const COLS = ["", "State", "Mem", "PID", "Txns", "Tx/s", "%Busy", "Tid", "Status", "Mtp", "Fid", "Uid", "Seen", "Dur", "Idle", "Msg"];
 
 function useColWidths() {
   const [widths, setWidths] = useState<number[]>(DEFAULT_WIDTHS);
@@ -36,16 +37,24 @@ function useColWidths() {
 
 function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, onProcDotClick }: { pid: number; txn: ActiveTxn & { durationMs: number }; staleSecs: number; txnCount: number; tps: number; busyPct: number; onKill?: ((pid: number, hnm: string) => void) | undefined; host: string; onProcDotClick?: ((host: string, pid: number, eid: string) => void) | undefined }) {
   const STALE_MS = staleSecs * 1000;
-  const rawBusy = !txn.finalStatus;
+  const msg = txn.lastMsg;
+  const procState = computeProcState(msg.Status);
+  const { isTerminal, isError: hasError } = procState;
+  const rawBusy = !txn.finalStatus && !isTerminal;
   const [busy, setBusy] = useState(rawBusy);
-  const [stale, setStale] = useState(() => Date.now() - txn.lastUpdateAt > STALE_MS);
+  const [stale, setStale] = useState(() => !isTerminal && Date.now() - txn.lastUpdateAt > STALE_MS);
   const [now, setNow] = useState(Date.now());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const lingerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBusy = useRef(rawBusy);
-  const msg = txn.lastMsg;
 
   useEffect(() => {
+    if (isTerminal) {
+      if (lingerTimer.current) clearTimeout(lingerTimer.current);
+      setBusy(false);
+      setStale(false);
+      return;
+    }
     if (rawBusy === prevBusy.current) return;
     prevBusy.current = rawBusy;
     if (rawBusy) {
@@ -55,20 +64,21 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
       lingerTimer.current = setTimeout(() => setBusy(false), BUSY_LINGER_MS);
     }
     return () => { if (lingerTimer.current) clearTimeout(lingerTimer.current); };
-  }, [rawBusy]);
+  }, [rawBusy, isTerminal]);
 
   useEffect(() => {
     setNow(Date.now());
-    setStale(Date.now() - txn.lastUpdateAt > STALE_MS);
-  }, [txn.lastUpdateAt, staleSecs]);
+    if (!isTerminal) setStale(Date.now() - txn.lastUpdateAt > STALE_MS);
+  }, [txn.lastUpdateAt, staleSecs, isTerminal]);
 
   useEffect(() => {
+    if (isTerminal) return;
     const id = setInterval(() => {
       setNow(Date.now());
       setStale(Date.now() - txn.lastUpdateAt > STALE_MS);
     }, 1000);
     return () => clearInterval(id);
-  }, [txn.lastUpdateAt, staleSecs]);
+  }, [txn.lastUpdateAt, staleSecs, isTerminal]);
 
   const formatTime = (ms: number) => {
     const safeMs = Math.max(0, ms);
@@ -83,13 +93,9 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
   const durationStr = formatTime(durationMs);
   const idleStr = formatTime(idleMs);
 
-  const statusUp = (msg.Status ?? "").toUpperCase();
-  const isDied = statusUp === "DIED";
-  const isShutdown = statusUp === "SHUTDOWN";
-  const hasError = statusUp === "ERROR";
-  const dotClass = isDied || isShutdown ? "dot-dead" : stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
-  const statusLabel = isDied ? "died" : isShutdown ? "shutdown" : stale ? "stale" : busy ? "busy" : "idle";
-  const statusClass = isDied ? "status-died" : isShutdown ? "status-shutdown" : stale ? "status-stale" : busy ? "status-busy" : "status-idle";
+  const dotClass = dotClassFor(procState, stale, busy);
+  const statusLabel = statusLabelFor(procState, stale, busy);
+  const statusClass = statusClassFor(procState, stale, busy);
   const firstSeen = new Date(txn.firstSeenAt).toLocaleTimeString();
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -119,7 +125,7 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
         <td id={`dd-cell-dot-${pid}`} className="dd-td dd-td-dot">
           <div
             id={`dd-dot-${pid}`}
-            className={`server-proc-dot ${dotClass}${hasError || isDied ? " dot-error-ring" : ""}`}
+            className={`server-proc-dot ${dotClass}${hasError || procState.isDied ? " dot-error-ring" : ""}`}
             onClick={handleDotClick}
             onContextMenu={handleContextMenu}
             style={{ cursor: "pointer" }}
@@ -250,7 +256,7 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
 
   useEffect(() => {
     const newLogs = allLogs.filter((log) => {
-      const key = `${log.pid}:${log.tid}:${log.Msg}:${log.Status}:${log.Severity}`;
+      const key = `${log.pid}:${log.tid}:${log.Msg}:${log.Status}:${log.Severity}:${(log as any)._receivedAt ?? log.firstSeenAt}`;
       if (seenKeysRef.current.has(key)) return false;
       seenKeysRef.current.add(key);
       return true;

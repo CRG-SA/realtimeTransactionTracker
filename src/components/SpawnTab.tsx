@@ -17,11 +17,13 @@ export const SpawnTab = React.memo(({
   thresholdSeconds,
   expandedTid,
   onToggleTid,
+  onRemoveTid,
 }: {
   actives: Map<string, ActiveTxn>;
   thresholdSeconds: number;
   expandedTid: string | null;
   onToggleTid: (tid: string) => void;
+  onRemoveTid: (tid: string) => void;
 }) => {
   const now = Date.now();
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(null);
@@ -126,7 +128,7 @@ export const SpawnTab = React.memo(({
               })}
               expandedTid={expandedTid}
               onToggleTid={onToggleTid}
-              onRemoveTid={() => {}}
+              onRemoveTid={onRemoveTid}
               onHide={() => {}}
               hideProgress
             />

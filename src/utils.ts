@@ -60,6 +60,56 @@ export function human(ms: number): string {
   return `${ss}.${String(Math.floor(mmm / 100)).padStart(1, "0")}s`;
 }
 
+export type ProcState = {
+  statusUp: string;
+  isDied: boolean;
+  isCoredump: boolean;
+  isShutdown: boolean;
+  isTerminal: boolean;
+  isError: boolean;
+};
+
+export function computeProcState(statusRaw: string | undefined): ProcState {
+  const statusUp = (statusRaw ?? "").toUpperCase();
+  const isDied = statusUp === "DIED";
+  const isCoredump = statusUp === "COREDUMP";
+  const isShutdown = statusUp === "SHUTDOWN";
+  return {
+    statusUp,
+    isDied,
+    isCoredump,
+    isShutdown,
+    isTerminal: isDied || isCoredump || isShutdown,
+    isError: statusUp === "ERROR",
+  };
+}
+
+export function dotClassFor(s: ProcState, stale: boolean, busy: boolean): string {
+  if (s.isCoredump) return "dot-dead dot-coredump";
+  if (s.isDied || s.isShutdown) return "dot-dead";
+  if (stale) return "dot-stale";
+  if (busy) return "dot-busy";
+  return "dot-idle";
+}
+
+export function statusLabelFor(s: ProcState, stale: boolean, busy: boolean): string {
+  if (s.isCoredump) return "coredump";
+  if (s.isDied) return "died";
+  if (s.isShutdown) return "shutdown";
+  if (stale) return "stale";
+  if (busy) return "busy";
+  return "idle";
+}
+
+export function statusClassFor(s: ProcState, stale: boolean, busy: boolean): string {
+  if (s.isCoredump) return "status-coredump";
+  if (s.isDied) return "status-died";
+  if (s.isShutdown) return "status-shutdown";
+  if (stale) return "status-stale";
+  if (busy) return "status-busy";
+  return "status-idle";
+}
+
 export function buildWsUrl(cfg: AppConfig): string {
   const loc = window.location;
   const isHttps = loc.protocol === "https:";

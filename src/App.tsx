@@ -245,8 +245,26 @@ export default function App() {
       for (const obj of batch) {
         const tid = obj.Tid;
         const status = (obj.Status || "").toLowerCase();
+        const isNoCoreDump = status === "nocoredump";
         const isTerminal = status === "success" || status === "failed" || status === "error" || status === "failure";
-        const isLifecycle = status === "died" || status === "shutdown" || status === "startup";
+        const isLifecycle = status === "died" || status === "coredump" || status === "shutdown" || status === "startup";
+
+        // NOCOREDUMP: append to logs only, never alter state
+        if (isNoCoreDump) {
+          if (obj.Hnm && (obj.Pid ?? 0) > 0) {
+            const procKey = `${obj.Hnm}:${obj.Pid}`;
+            const sexisting = s.get(procKey);
+            if (sexisting) {
+              const msgs = sexisting.messages || [];
+              msgs.push({ ...obj, _receivedAt: now } as any);
+              if (msgs.length > 100) msgs.shift();
+              sexisting.messages = msgs;
+              s.set(procKey, sexisting);
+              changed = true;
+            }
+          }
+          continue;
+        }
 
         // Lifecycle packets (DIED/SHUTDOWN/STARTUP) have no Tid — only update serverActives
         if (!isLifecycle) {
@@ -285,11 +303,39 @@ export default function App() {
           const procKey = `${obj.Hnm}:${obj.Pid}`;
           const sexisting = s.get(procKey);
 
+          // Terminal ranking: COREDUMP > DIED > SHUTDOWN > non-terminal. Once a slot is
+          // terminal, it can only be upgraded to a more-severe terminal, never downgraded.
+          const TERMINAL_RANK: Record<string, number> = { SHUTDOWN: 1, DIED: 2, COREDUMP: 3 };
+          const prevStatusUp = (sexisting?.lastMsg?.Status ?? "").toUpperCase();
+          const nextStatusUp = (obj.Status ?? "").toUpperCase();
+          const prevRank = TERMINAL_RANK[prevStatusUp] ?? 0;
+          const nextRank = TERMINAL_RANK[nextStatusUp] ?? 0;
+          const preserveTerminal = prevRank > 0 && nextRank < prevRank;
+
           if (isLifecycle) {
             if (sexisting) {
-              // Stamp only Status onto existing lastMsg — preserve Eid and all other fields
               sexisting.lastUpdateAt = now;
-              sexisting.lastMsg = { ...sexisting.lastMsg, Status: obj.Status };
+              sexisting.lastMsg = preserveTerminal
+                ? sexisting.lastMsg
+                : { ...sexisting.lastMsg, Status: obj.Status };
+              const msgs = sexisting.messages || [];
+              msgs.push({ ...obj, _receivedAt: now } as any);
+              const MAX_HISTORY = 100;
+              if (msgs.length > MAX_HISTORY) msgs.shift();
+              sexisting.messages = msgs;
+              // If this lifecycle packet is terminal (DIED/COREDUMP/SHUTDOWN),
+              // freeze the slot: close the open busy interval and mark endAt so
+              // %busy and stale can never grow.
+              const lifecycleTerminal = nextRank > 0;
+              if (lifecycleTerminal && !sexisting.endAt) {
+                sexisting.endAt = now;
+                sexisting.finalStatus = status;
+                const intervals = procBusyIntervalsRef.current.get(procKey);
+                if (intervals?.length) {
+                  const last = intervals[intervals.length - 1]!;
+                  if (!last.end) last.end = now;
+                }
+              }
               s.set(procKey, sexisting);
             }
             // If no existing slot, ignore — nothing to mark
@@ -322,7 +368,9 @@ export default function App() {
             } else {
               // Continuing transaction — update slot
               sexisting.lastUpdateAt = now;
-              sexisting.lastMsg = obj;
+              sexisting.lastMsg = preserveTerminal
+                ? { ...obj, Status: sexisting.lastMsg!.Status }
+                : obj;
               const msgs = sexisting.messages || [];
               msgs.push({ ...obj, _receivedAt: now } as any);
               const MAX_HISTORY = 100;
@@ -352,12 +400,25 @@ export default function App() {
         const isSpawn = !!(obj.Fnm && obj.Fnm.toLowerCase().includes("spawn"));
         if (!isSpawn) continue;
         const spawnKey = `${obj.Hnm ?? ""}:${obj.Pid ?? 0}`;
-        const status = (obj.Status || "").toLowerCase();
-        const isTerminal = status === "success" || status === "failed" || status === "error" || status === "failure" || status === "died" || status === "coredump";
+        const spawnStatus = (obj.Status || "").toLowerCase();
+        const isSpawnNoCoreDump = spawnStatus === "nocoredump";
+        const isTerminal = spawnStatus === "success" || spawnStatus === "failed" || spawnStatus === "error" || spawnStatus === "failure" || spawnStatus === "died" || spawnStatus === "coredump";
         const existing = sp.get(spawnKey);
+        if (isSpawnNoCoreDump) {
+          // Append to log only — do not alter lastMsg or any state
+          if (existing) {
+            const msgs = existing.messages || [];
+            msgs.push({ ...obj, _receivedAt: now } as any);
+            if (msgs.length > 200) msgs.shift();
+            existing.messages = msgs;
+            sp.set(spawnKey, existing);
+            spawnChanged = true;
+          }
+          continue;
+        }
         if (!existing) {
           const txn: ActiveTxn = { tid: spawnKey, firstSeenAt: now, lastUpdateAt: now, lastMsg: obj, messages: [obj] };
-          if (isTerminal) { txn.endAt = now; txn.finalStatus = status; }
+          if (isTerminal) { txn.endAt = now; txn.finalStatus = spawnStatus; }
           sp.set(spawnKey, txn);
         } else {
           existing.lastUpdateAt = now;
@@ -366,7 +427,7 @@ export default function App() {
           msgs.push({ ...obj, _receivedAt: now } as any);
           if (msgs.length > 200) msgs.shift();
           existing.messages = msgs;
-          if (isTerminal && !existing.endAt) { existing.endAt = now; existing.finalStatus = status; }
+          if (isTerminal && !existing.endAt) { existing.endAt = now; existing.finalStatus = spawnStatus; }
           sp.set(spawnKey, existing);
         }
         spawnChanged = true;
@@ -408,6 +469,14 @@ export default function App() {
       return new Map(m);
     });
     if (expandedTid === tid) setExpandedTid(null);
+  }
+
+  function removeSpawnTid(tid: string) {
+    setSpawnActives(() => {
+      const m = spawnActivesRef.current;
+      m.delete(tid);
+      return new Map(m);
+    });
   }
 
   function clearAll() {
@@ -510,9 +579,12 @@ export default function App() {
                 const trimmedIntervals = allIntervals.filter(iv => (iv.end ?? now) >= busyCutoff);
                 procBusyIntervalsRef.current.set(procKey, trimmedIntervals);
                 const windowMs = now - busyCutoff;
+                // For terminal processes, cap all interval ends at txn.endAt so the
+                // unclosed last interval can't grow and push %busy to 100%.
+                const endCap = txn.endAt ?? now;
                 const busyMs = trimmedIntervals.reduce((sum, iv) => {
                   const s = Math.max(iv.start, busyCutoff);
-                  const e = iv.end ?? now;
+                  const e = Math.min(iv.end ?? now, endCap);
                   return sum + Math.max(0, e - s);
                 }, 0);
                 const busyPct = Math.round(busyMs / windowMs * 10000) / 100;
@@ -829,6 +901,7 @@ export default function App() {
               thresholdSeconds={thresholdSeconds}
               expandedTid={expandedTid}
               onToggleTid={(tid: string) => setExpandedTid(expandedTid === tid ? null : tid)}
+              onRemoveTid={removeSpawnTid}
             />
           ) : groupBy === "drilldown" && activeDrilldown ? (() => {
             const label = activeDrilldown;
@@ -946,31 +1019,35 @@ export default function App() {
                 <div className="info-section">
                   <div className="info-section-title">Process Dot Colors (Robot Tab)</div>
                   <div className="info-rule">
-                    <span className="info-dot" style={{ background: "#22c55e" }} />
-                    <span><strong>Green (Idle):</strong> Process is running, no active transactions</span>
+                    <span className="info-dot" style={{ background: "#22c55e", boxShadow: "0 0 0 2px rgba(34,197,94,0.2), 0 0 6px rgba(34,197,94,0.4)" }} />
+                    <span><strong>Green (Idle):</strong> Process is alive, no active transactions</span>
                   </div>
                   <div className="info-rule">
-                    <span className="info-dot" style={{ background: "#ef4444" }} />
+                    <span className="info-dot" style={{ background: "#ef4444", boxShadow: "0 0 0 2px rgba(239,68,68,0.2), 0 0 8px rgba(239,68,68,0.6)" }} />
                     <span><strong>Red (Busy):</strong> Process has active transactions in flight</span>
                   </div>
                   <div className="info-rule">
-                    <span className="info-dot" style={{ background: "#166534" }} />
-                    <span><strong>Dark Green (Stale):</strong> Process hasn't sent data for {staleMinutes} minute{staleMinutes !== 1 ? "s" : ""}</span>
+                    <span className="info-dot" style={{ background: "#166534", boxShadow: "0 0 0 2px rgba(22,101,52,0.2), 0 0 6px rgba(22,101,52,0.3)" }} />
+                    <span><strong>Dark Green (Stale):</strong> No heartbeat received for {staleMinutes} minute{staleMinutes !== 1 ? "s" : ""}</span>
                   </div>
                   <div className="info-rule">
                     <span className="info-dot" style={{ background: "#9ca3af" }} />
-                    <span><strong>Grey (Dead):</strong> Process has shut down or died</span>
+                    <span><strong>Grey (Died / Shutdown):</strong> Process has exited cleanly or been killed</span>
+                  </div>
+                  <div className="info-rule">
+                    <span className="info-dot" style={{ background: "#9ca3af", boxShadow: "0 0 0 2px rgba(239,68,68,0.9), 0 0 8px 2px rgba(239,68,68,0.7)" }} />
+                    <span><strong>Grey + Red Ring (Coredump):</strong> Process crashed with a core dump</span>
                   </div>
                 </div>
                 <div className="info-section">
                   <div className="info-section-title">Special Indicators</div>
                   <div className="info-rule">
-                    <span className="info-ring" style={{ boxShadow: "0 0 0 2px rgba(239, 68, 68, 0.9), 0 0 8px 2px rgba(239, 68, 68, 0.7)" }} />
-                    <span><strong>Red Shadow Ring:</strong> Last transaction ended with ERROR status</span>
+                    <span className="info-dot" style={{ background: "#22c55e", boxShadow: "0 0 0 2px rgba(239,68,68,0.9), 0 0 8px 2px rgba(239,68,68,0.7)" }} />
+                    <span><strong>Red Ring (Error):</strong> Last transaction ended with ERROR status</span>
                   </div>
                   <div className="info-rule">
                     <span className="info-dot" style={{ background: "#f97316", boxShadow: "0 0 3px rgba(249, 115, 22, 0.9)" }} />
-                    <span><strong>Orange Inner Dot:</strong> High transaction rate (Tx/s ≥ {tpsInnerDotThreshold}) or busy threshold exceeded</span>
+                    <span><strong>Orange Inner Dot:</strong> High transaction rate (Tx/s ≥ {tpsInnerDotThreshold}) or %Busy above threshold</span>
                   </div>
                 </div>
               </div>

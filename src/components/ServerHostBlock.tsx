@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ActiveTxn } from "../types";
-import { human } from "../utils";
+import { computeProcState, dotClassFor, statusLabelFor, statusClassFor, human } from "../utils";
 
 type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number }; txnCount?: number; tps?: number; busyPct?: number };
 type EidGroup = { eid: string; procs: ProcEntry[] };
@@ -20,16 +20,25 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
   onKill?: ((pid: number, hnm: string) => void) | undefined;
 }) {
   const STALE_MS = staleSecs * 1000;
-  const rawBusy = !txn.finalStatus;
+  const msg = txn.lastMsg;
+  const procState = computeProcState(msg.Status);
+  const { isTerminal, isDied, isError: hasError } = procState;
+
+  const rawBusy = !txn.finalStatus && !isTerminal;
   const [busy, setBusy] = useState(rawBusy);
-  const [stale, setStale] = useState(() => Date.now() - txn.lastUpdateAt > STALE_MS);
+  const [stale, setStale] = useState(() => !isTerminal && Date.now() - txn.lastUpdateAt > STALE_MS);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const lingerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBusy = useRef(rawBusy);
-  const msg = txn.lastMsg;
 
   useEffect(() => {
+    if (isTerminal) {
+      if (lingerTimer.current) clearTimeout(lingerTimer.current);
+      setBusy(false);
+      setStale(false);
+      return;
+    }
     if (rawBusy === prevBusy.current) return;
     prevBusy.current = rawBusy;
 
@@ -43,23 +52,21 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
     return () => {
       if (lingerTimer.current) clearTimeout(lingerTimer.current);
     };
-  }, [rawBusy, busyLingerMs]);
+  }, [rawBusy, busyLingerMs, isTerminal]);
 
   useEffect(() => {
-    setStale(Date.now() - txn.lastUpdateAt > STALE_MS);
-  }, [txn.lastUpdateAt, staleSecs]);
+    if (!isTerminal) setStale(Date.now() - txn.lastUpdateAt > STALE_MS);
+  }, [txn.lastUpdateAt, staleSecs, isTerminal]);
 
   useEffect(() => {
+    if (isTerminal) return;
     const id = setInterval(() => setStale(Date.now() - txn.lastUpdateAt > STALE_MS), 10_000);
     return () => clearInterval(id);
-  }, [txn.lastUpdateAt, staleSecs]);
+  }, [txn.lastUpdateAt, staleSecs, isTerminal]);
 
-  const statusUp = (msg.Status ?? "").toUpperCase();
-  const isDied = statusUp === "DIED";
-  const isCoredump = statusUp === "COREDUMP";
-  const isShutdown = statusUp === "SHUTDOWN";
-  const hasError = statusUp === "ERROR";
-  const dotClass = isCoredump ? "dot-dead dot-coredump" : isDied || isShutdown ? "dot-dead" : stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
+  const dotClass = dotClassFor(procState, stale, busy);
+  const stateLabel = statusLabelFor(procState, stale, busy);
+  const stateClass = statusClassFor(procState, stale, busy);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -81,7 +88,7 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
     <div id={`proc-dot-wrap-${pid}`} className="proc-dot-wrap">
       <div
         id={`proc-dot-${pid}`}
-        className={`server-proc-dot ${dotClass}${hasError || isDied ? " dot-error-ring" : ""}`}
+        className={`server-proc-dot ${dotClass}${hasError || isDied || procState.isCoredump ? " dot-error-ring" : ""}`}
         onMouseEnter={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
         onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
         onMouseLeave={() => setMousePos(null)}
@@ -97,8 +104,8 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
         <div id={`proc-dot-popup-${pid}`} className="proc-dot-popup" style={{ left: mousePos.x + 12, top: mousePos.y - 8 }}>
           <div id={`proc-dot-popup-title-${pid}`} className="proc-dot-popup-row proc-dot-popup-title">
             <span>{msg.Eid ? msg.Eid : `PID ${pid}`}</span>
-            <span id={`proc-dot-popup-status-${pid}`} className={`proc-dot-status ${busy ? "status-busy" : "status-idle"}`}>
-              {busy ? "busy" : "idle"}
+            <span id={`proc-dot-popup-status-${pid}`} className={`proc-dot-status ${stateClass}`}>
+              {stateLabel}
             </span>
           </div>
           <div className="proc-dot-popup-row"><span className="proc-dot-key">PID</span><span className="proc-dot-val">{pid}</span></div>

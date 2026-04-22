@@ -1349,11 +1349,8 @@ body {
   box-shadow: none;
 }
 
-.dot-coredump {
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.9), 0 0 8px 2px rgba(239, 68, 68, 0.7) !important;
-}
-
-.dot-error-ring {
+.dot-error-ring:not(.dot-dead),
+.dot-error-ring.dot-coredump {
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.9), 0 0 8px 2px rgba(239, 68, 68, 0.7) !important;
 }
 
