@@ -409,8 +409,8 @@ json_escape (char *dst, size_t dst_size, const char *src)
 static void
 send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus, const char *eid, const char *fnm, const char *fid)
 {
-    const char *host = getenv ("TELEMETRY_HOST");
-    const char *port_str = getenv ("TELEMETRY_PORT");
+    const char *host = getenv ("TELEMETRY_UDP_IP");
+    const char *port_str = getenv ("TELEMETRY_UDP_PORT");
     struct sockaddr_in addr;
     int sock;
     char die_fields[256];
@@ -496,8 +496,8 @@ send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus,
 static void
 send_coredump_telemetry_delayed (pid_t dead_pid, const char *eid, const char *fnm, const char *fid)
 {
-    const char *host = getenv ("TELEMETRY_HOST");
-    const char *port_str = getenv ("TELEMETRY_PORT");
+    const char *host = getenv ("TELEMETRY_UDP_IP");
+    const char *port_str = getenv ("TELEMETRY_UDP_PORT");
     pid_t child;
 
     if (!host || !port_str)
