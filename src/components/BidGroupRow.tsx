@@ -16,6 +16,7 @@ export function BidGroupRow({
   onToggleTid,
   onRemoveTid,
   onHide,
+  hideProgress = false,
 }: {
   bid: string;
   txns: TxnWithDuration[];
@@ -27,8 +28,10 @@ export function BidGroupRow({
   onToggleTid: (tid: string) => void;
   onRemoveTid: (tid: string) => void;
   onHide: (bid: string) => void;
+  hideProgress?: boolean;
 }) {
   const isNoBid = bid === "\x00no-bid";
+  const safeBid = bid.replace(/\x00/g, "no-bid").replace(/[^a-zA-Z0-9_\-.]/g, "_");
   const sec = longestDurationMs / 1000;
   const color = colorForSeconds(sec, thresholdSeconds);
   const baseRedSeconds = Math.max(thresholdSeconds + 1, 60);
@@ -54,33 +57,46 @@ export function BidGroupRow({
   })();
 
   return (
-    <div className="bid-group card" onClick={onToggleExpand} style={{ cursor: "pointer" }}>
-      {!isExpanded && (
+    <div id={`bid-card-${safeBid}`} className="bid-group card" onClick={onToggleExpand} style={{ cursor: "pointer" }}>
+      {!isExpanded && !hideProgress && (
         <div
+          id={`bid-progress-bar-${safeBid}`}
           className="txn-progress"
           style={{ background: `linear-gradient(90deg, ${color} ${pct}%, rgba(0,0,0,0.06) ${pct}%)` }}
         />
       )}
-      <div className="bid-group-header">
-        <div className="bid-group-header-left">
-          <span className="bid-group-label">{isNoBid ? "— no BID —" : `BID: ${bid}`}</span>
-          <span className="bid-group-count" style={countStyle}>
+      <div id={`bid-header-${safeBid}`} className="bid-group-header">
+        <div id={`bid-header-left-${safeBid}`} className="bid-group-header-left">
+          <span id={`bid-label-${safeBid}`} className="bid-group-label">
+            {isNoBid ? "— no BID —" : `BID: ${bid}`}
+          </span>
+          <span id={`bid-count-badge-${safeBid}`} className="bid-group-count" style={countStyle}>
             {txns.length} TID{txns.length !== 1 ? "s" : ""}
           </span>
-          <span className="bid-group-duration" style={{ color }}>{human(longestDurationMs)}</span>
+          {!hideProgress && (
+            <span id={`bid-duration-badge-${safeBid}`} className="bid-group-duration" style={{ color }}>
+              {human(longestDurationMs)}
+            </span>
+          )}
           {Array.from(statusCounts.entries()).map(([s, n]) => (
-            <span key={s} className="txn-badge txn-badge-blue">
+            <span
+              key={s}
+              id={`bid-status-badge-${safeBid}-${s}`}
+              className={`txn-badge ${s === "COREDUMP" ? "txn-badge-red" : "txn-badge-blue"}`}
+            >
               {s}{n > 1 ? ` ×${n}` : ""}
             </span>
           ))}
         </div>
-        <span className="expand-indicator">{isExpanded ? "▲" : "▼"}</span>
+        <span id={`bid-expand-arrow-${safeBid}`} className="expand-indicator">
+          {isExpanded ? "▲" : "▼"}
+        </span>
       </div>
 
       {!isExpanded && (
-        <div className="txn-body">
-          <div className="txn-main">
-            <div className="txn-grid">
+        <div id={`bid-summary-body-${safeBid}`} className="txn-body">
+          <div id={`bid-summary-main-${safeBid}`} className="txn-main">
+            <div id={`bid-summary-kv-grid-${safeBid}`} className="txn-grid">
               {lm.Uid && <KV k="Uid" v={lm.Uid} />}
               {lm.Hnm && <KV k="Host" v={lm.Hnm} />}
               {lm.Eid && <KV k="Eid" v={lm.Eid} />}
@@ -89,14 +105,19 @@ export function BidGroupRow({
               {lm.Pid !== undefined && lm.Pid > 0 && <KV k="Pid" v={String(lm.Pid)} />}
             </div>
           </div>
-          <div className="txn-side" onClick={(e) => e.stopPropagation()}>
-            <button className="btn-icon" title="Hide this BID" onClick={() => onHide(bid)}>✕</button>
+          <div id={`bid-summary-side-${safeBid}`} className="txn-side" onClick={(e) => e.stopPropagation()}>
+            <button
+              id={`bid-hide-button-${safeBid}`}
+              className="btn-icon"
+              title="Hide this BID"
+              onClick={() => onHide(bid)}
+            >✕</button>
           </div>
         </div>
       )}
 
       {isExpanded && (
-        <div className="bid-group-children" onClick={(e) => e.stopPropagation()}>
+        <div id={`bid-children-${safeBid}`} className="bid-group-children" onClick={(e) => e.stopPropagation()}>
           {txns.map((t) => (
             <TxnRow
               key={t.tid}
@@ -106,6 +127,7 @@ export function BidGroupRow({
               isExpanded={expandedTid === t.tid}
               onToggleExpand={() => onToggleTid(t.tid)}
               highLoad={txns.length > 5}
+              hideProgress={hideProgress}
             />
           ))}
         </div>

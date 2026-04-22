@@ -18,36 +18,52 @@ export const ProcessRow = React.memo(({ entry, thresholdSeconds }: {
   const isEnded = !!txn.finalStatus;
 
   return (
-    <div className="proc-row">
+    <div id={`proc-row-${pid}`} className="proc-row">
       <div
+        id={`proc-progress-bar-${pid}`}
         className="txn-progress"
         style={{ background: `linear-gradient(90deg, ${color} ${pct}%, rgba(0,0,0,0.06) ${pct}%)` }}
       />
-      <div className="txn-body">
-        <div className="txn-main">
-          <div className="txn-header-row">
-            <div className="txn-header-left">
-              <span className="proc-pid">PID {pid}</span>
-              <span className="txn-badge txn-badge-muted">{human(txn.durationMs)}</span>
-              {msg.Status && <span className="txn-badge txn-badge-blue">{msg.Status}</span>}
-              {msg.Mtp && <span className="txn-badge txn-badge-purple">{msg.Mtp}</span>}
+      <div id={`proc-body-${pid}`} className="txn-body">
+        <div id={`proc-main-${pid}`} className="txn-main">
+          <div id={`proc-header-row-${pid}`} className="txn-header-row">
+            <div id={`proc-header-left-${pid}`} className="txn-header-left">
+              <span id={`proc-pid-label-${pid}`} className="proc-pid">PID {pid}</span>
+              <span id={`proc-duration-badge-${pid}`} className="txn-badge txn-badge-muted">
+                {human(txn.durationMs)}
+              </span>
+              {msg.Status && (
+                <span id={`proc-status-badge-${pid}`} className="txn-badge txn-badge-blue">
+                  {msg.Status}
+                </span>
+              )}
+              {msg.Mtp && (
+                <span id={`proc-mtp-badge-${pid}`} className="txn-badge txn-badge-purple">
+                  {msg.Mtp}
+                </span>
+              )}
               {isEnded && (
-                <span className={txn.finalStatus === "success" ? "txn-badge txn-badge-blue" : "txn-badge proc-badge-error"}>
+                <span
+                  id={`proc-final-badge-${pid}`}
+                  className={txn.finalStatus === "success" ? "txn-badge txn-badge-blue" : "txn-badge proc-badge-error"}
+                >
                   {txn.finalStatus}
                 </span>
               )}
             </div>
           </div>
-          <div className="txn-grid">
+          <div id={`proc-kv-grid-${pid}`} className="txn-grid">
             {msg.Eid && <KV k="Eid" v={msg.Eid} />}
             {msg.Fid && <KV k="Fid" v={msg.Fid} />}
             {msg.Uid && <KV k="Uid" v={msg.Uid} />}
             {msg.Cid && <KV k="Cid" v={msg.Cid} />}
           </div>
-          {msg.Msg && <div className="txn-message">{msg.Msg}</div>}
+          {msg.Msg && (
+            <div id={`proc-message-${pid}`} className="txn-message">{msg.Msg}</div>
+          )}
         </div>
-        <div className="txn-side">
-          <span className="txn-health" style={{ color }}>
+        <div id={`proc-side-${pid}`} className="txn-side">
+          <span id={`proc-health-label-${pid}`} className="txn-health" style={{ color }}>
             {sec >= baseRedSeconds ? "Critical" : sec >= thresholdSeconds ? "Degrading" : "OK"}
           </span>
         </div>
@@ -55,3 +71,5 @@ export const ProcessRow = React.memo(({ entry, thresholdSeconds }: {
     </div>
   );
 });
+
+ProcessRow.displayName = "ProcessRow";

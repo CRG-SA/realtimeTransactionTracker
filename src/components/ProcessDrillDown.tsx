@@ -115,33 +115,45 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
 
   return (
     <>
-      <tr className="dd-tr">
-        <td className="dd-td dd-td-dot"><div className={`server-proc-dot ${dotClass}${hasError || isDied ? " dot-error-ring" : ""}`} onClick={handleDotClick} onContextMenu={handleContextMenu} style={{ cursor: "pointer" }} /></td>
-      <td className="dd-td" title={statusLabel} onClick={handleDotClick} style={{ cursor: "pointer" }}><span className={statusClass}>{statusLabel}</span></td>
-      <td className="dd-td" title={(msg as any).Ct2 ? `${(parseInt((msg as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : ""}>
-        {(msg as any).Ct2 ? `${(parseInt((msg as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : "—"}
-      </td>
-      <td className="dd-td" title={String(pid)}>{pid}</td>
-      <td className="dd-td" title={String(txnCount)}>{txnCount.toLocaleString()}</td>
-      <td className="dd-td" title={tps.toFixed(1)}>{tps.toFixed(1)}</td>
-      <td className="dd-td" title={`${busyPct.toFixed(2)}%`}>{busyPct.toFixed(2)}%</td>
-      <td className="dd-td dd-mono" title={msg.Tid ?? ""}>{msg.Tid ?? "—"}</td>
-      <td className="dd-td" title={msg.Status ?? ""}>{msg.Status ?? "—"}</td>
-      <td className="dd-td" title={msg.Mtp ?? ""}>{msg.Mtp ?? "—"}</td>
-      <td className="dd-td" title={msg.Fid ?? ""}>{msg.Fid ?? "—"}</td>
-      <td className="dd-td" title={msg.Uid ?? ""}>{msg.Uid ?? "—"}</td>
-      <td className="dd-td" title={firstSeen}>{firstSeen}</td>
-      <td className="dd-td" title={durationStr}>{durationStr}</td>
-      <td className="dd-td" title={rawBusy ? "" : idleStr}>{rawBusy ? "—" : idleStr}</td>
-      <td className="dd-td dd-msg" title={msg.Msg ?? ""}>{msg.Msg ?? ""}</td>
+      <tr id={`dd-row-${pid}`} className="dd-tr">
+        <td id={`dd-cell-dot-${pid}`} className="dd-td dd-td-dot">
+          <div
+            id={`dd-dot-${pid}`}
+            className={`server-proc-dot ${dotClass}${hasError || isDied ? " dot-error-ring" : ""}`}
+            onClick={handleDotClick}
+            onContextMenu={handleContextMenu}
+            style={{ cursor: "pointer" }}
+          />
+        </td>
+        <td id={`dd-cell-status-${pid}`} className="dd-td" title={statusLabel} onClick={handleDotClick} style={{ cursor: "pointer" }}>
+          <span className={statusClass}>{statusLabel}</span>
+        </td>
+        <td id={`dd-cell-mem-${pid}`} className="dd-td" title={(msg as any).Ct2 ? `${(parseInt((msg as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : ""}>
+          {(msg as any).Ct2 ? `${(parseInt((msg as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : "—"}
+        </td>
+        <td id={`dd-cell-pid-${pid}`} className="dd-td" title={String(pid)}>{pid}</td>
+        <td id={`dd-cell-txns-${pid}`} className="dd-td" title={String(txnCount)}>{txnCount.toLocaleString()}</td>
+        <td id={`dd-cell-tps-${pid}`} className="dd-td" title={tps.toFixed(1)}>{tps.toFixed(1)}</td>
+        <td id={`dd-cell-busy-${pid}`} className="dd-td" title={`${busyPct.toFixed(2)}%`}>{busyPct.toFixed(2)}%</td>
+        <td id={`dd-cell-tid-${pid}`} className="dd-td dd-mono" title={msg.Tid ?? ""}>{msg.Tid ?? "—"}</td>
+        <td id={`dd-cell-msgstatus-${pid}`} className="dd-td" title={msg.Status ?? ""}>{msg.Status ?? "—"}</td>
+        <td id={`dd-cell-mtp-${pid}`} className="dd-td" title={msg.Mtp ?? ""}>{msg.Mtp ?? "—"}</td>
+        <td id={`dd-cell-fid-${pid}`} className="dd-td" title={msg.Fid ?? ""}>{msg.Fid ?? "—"}</td>
+        <td id={`dd-cell-uid-${pid}`} className="dd-td" title={msg.Uid ?? ""}>{msg.Uid ?? "—"}</td>
+        <td id={`dd-cell-seen-${pid}`} className="dd-td" title={firstSeen}>{firstSeen}</td>
+        <td id={`dd-cell-dur-${pid}`} className="dd-td" title={durationStr}>{durationStr}</td>
+        <td id={`dd-cell-idle-${pid}`} className="dd-td" title={rawBusy ? "" : idleStr}>{rawBusy ? "—" : idleStr}</td>
+        <td id={`dd-cell-msg-${pid}`} className="dd-td dd-msg" title={msg.Msg ?? ""}>{msg.Msg ?? ""}</td>
       </tr>
       {contextMenu && (
-        <div className="proc-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          <div className="proc-context-header">
-            <span className="proc-context-title">{msg.Eid ? msg.Eid : `PID ${pid}`}</span>
-            <button className="proc-context-close" onClick={closeContext}>✕</button>
+        <div id={`dd-context-menu-${pid}`} className="proc-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div id={`dd-context-header-${pid}`} className="proc-context-header">
+            <span id={`dd-context-title-${pid}`} className="proc-context-title">
+              {msg.Eid ? msg.Eid : `PID ${pid}`}
+            </span>
+            <button id={`dd-context-close-${pid}`} className="proc-context-close" onClick={closeContext}>✕</button>
           </div>
-          <div className="proc-context-content">
+          <div id={`dd-context-content-${pid}`} className="proc-context-content">
             <div className="proc-dot-popup-row"><span className="proc-dot-key">PID</span><span className="proc-dot-val">{pid}</span></div>
             {msg.Tid && <div className="proc-dot-popup-row"><span className="proc-dot-key">Tid</span><span className="proc-dot-val">{msg.Tid}</span></div>}
             {msg.Status && <div className="proc-dot-popup-row"><span className="proc-dot-key">Status</span><span className="proc-dot-val">{msg.Status}</span></div>}
@@ -156,7 +168,7 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
             <div className="proc-dot-popup-row"><span className="proc-dot-key">Duration</span><span className="proc-dot-val">{durationStr}</span></div>
             {(msg as any).Ct2 && <div className="proc-dot-popup-row"><span className="proc-dot-key">Memory</span><span className="proc-dot-val">{(parseInt((msg as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB</span></div>}
           </div>
-          <button className="proc-context-restart-btn" onClick={handleRestart}>
+          <button id={`dd-context-restart-btn-${pid}`} className="proc-context-restart-btn" onClick={handleRestart}>
             Restart Process
           </button>
         </div>
@@ -167,14 +179,15 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
 
 function DrillDownTable({ hostProcs, staleSecs, onKill, host, onProcDotClick }: { hostProcs: ProcEntry[]; staleSecs: number; onKill?: ((pid: number, hnm: string) => void) | undefined; host: string; onProcDotClick?: ((host: string, pid: number, eid: string) => void) | undefined }) {
   const { widths, onMouseDown } = useColWidths();
+  const safeHost = host.replace(/[^a-zA-Z0-9_\-.]/g, "_");
 
   return (
-    <table className="dd-table">
+    <table id={`dd-table-${safeHost}`} className="dd-table">
       <colgroup>
         {widths.map((w, i) => <col key={i} style={{ width: w }} />)}
       </colgroup>
-      <thead>
-        <tr>
+      <thead id={`dd-thead-${safeHost}`}>
+        <tr id={`dd-thead-row-${safeHost}`}>
           {COLS.map((c, i) => (
             <th key={i} className="dd-th">
               <div className="dd-th-inner">
@@ -187,7 +200,7 @@ function DrillDownTable({ hostProcs, staleSecs, onKill, host, onProcDotClick }: 
           ))}
         </tr>
       </thead>
-      <tbody>
+      <tbody id={`dd-tbody-${safeHost}`}>
         {hostProcs.map(({ pid, txn, txnCount, tps, busyPct }) => (
           <ProcRow key={pid} pid={pid} txn={txn} staleSecs={staleSecs} txnCount={txnCount ?? 0} tps={tps ?? 0} busyPct={busyPct ?? 0} onKill={onKill} host={host} onProcDotClick={onProcDotClick} />
         ))}
@@ -235,7 +248,6 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
     txn.messages.map((msg) => ({ ...msg, pid, tid: txn.tid, firstSeenAt: txn.firstSeenAt }))
   );
 
-  // Accumulate new logs and avoid duplicates
   useEffect(() => {
     const newLogs = allLogs.filter((log) => {
       const key = `${log.pid}:${log.tid}:${log.Msg}:${log.Status}:${log.Severity}`;
@@ -249,7 +261,6 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
     }
   }, [allLogs]);
 
-  // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
@@ -257,19 +268,19 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
   }, [accumulatedLogs.length]);
 
   if (accumulatedLogs.length === 0) {
-    return <div className="logs-empty">No log messages yet</div>;
+    return <div id="logs-empty" className="logs-empty">No log messages yet</div>;
   }
 
   return (
-    <div className="logs-container">
-      <div className="logs-header">Message Log ({accumulatedLogs.length} messages)</div>
-      <div className="logs-table-wrapper" ref={containerRef}>
-        <table className="logs-table">
+    <div id="logs-container" className="logs-container">
+      <div id="logs-header" className="logs-header">Message Log ({accumulatedLogs.length} messages)</div>
+      <div id="logs-table-wrapper" className="logs-table-wrapper" ref={containerRef}>
+        <table id="logs-table" className="logs-table">
           <colgroup>
             {widths.map((w, i) => <col key={i} style={{ width: w }} />)}
           </colgroup>
-          <thead>
-            <tr>
+          <thead id="logs-thead">
+            <tr id="logs-thead-row">
               {LOGS_COLS.map((c, i) => (
                 <th key={i} className="logs-th">
                   <div className="logs-th-inner">
@@ -282,7 +293,7 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody id="logs-tbody">
             {accumulatedLogs
               .sort((a, b) => {
                 const timeA = (a as any)._receivedAt ?? a.firstSeenAt;
@@ -294,20 +305,20 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
                 const date = new Date(timestamp);
                 const timeStr = `${date.toLocaleTimeString()}.${String(date.getMilliseconds()).padStart(3, '0')}`;
                 return (
-                  <tr key={i} className="logs-tr">
-                    <td className="logs-td logs-td-time">{timeStr}</td>
-                    <td className="logs-td logs-td-pid" title={String(log.pid)}>{log.pid}</td>
-                    <td className="logs-td logs-td-tid" title={log.tid}>{log.tid}</td>
-                    <td className="logs-td logs-td-severity" title={log.Severity ?? ""}>{log.Severity ?? "—"}</td>
-                    <td className="logs-td logs-td-status" title={log.Status ?? ""}>{log.Status ?? "—"}</td>
-                    <td className="logs-td" title={log.Mtp ?? ""}>{log.Mtp ?? "—"}</td>
-                    <td className="logs-td" title={log.Fid ?? ""}>{log.Fid ?? "—"}</td>
-                    <td className="logs-td" title={log.Uid ?? ""}>{log.Uid ?? "—"}</td>
-                    <td className="logs-td" title={log.Ret !== undefined ? String(log.Ret) : ""}>{log.Ret !== undefined ? log.Ret : "—"}</td>
-                    <td className="logs-td" title={(log as any).Ct2 ? `${(parseInt((log as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : ""}>
+                  <tr key={i} id={`logs-row-${i}`} className="logs-tr">
+                    <td id={`logs-cell-time-${i}`} className="logs-td logs-td-time">{timeStr}</td>
+                    <td id={`logs-cell-pid-${i}`} className="logs-td logs-td-pid" title={String(log.pid)}>{log.pid}</td>
+                    <td id={`logs-cell-tid-${i}`} className="logs-td logs-td-tid" title={log.tid}>{log.tid}</td>
+                    <td id={`logs-cell-severity-${i}`} className="logs-td logs-td-severity" title={log.Severity ?? ""}>{log.Severity ?? "—"}</td>
+                    <td id={`logs-cell-status-${i}`} className="logs-td logs-td-status" title={log.Status ?? ""}>{log.Status ?? "—"}</td>
+                    <td id={`logs-cell-mtp-${i}`} className="logs-td" title={log.Mtp ?? ""}>{log.Mtp ?? "—"}</td>
+                    <td id={`logs-cell-fid-${i}`} className="logs-td" title={log.Fid ?? ""}>{log.Fid ?? "—"}</td>
+                    <td id={`logs-cell-uid-${i}`} className="logs-td" title={log.Uid ?? ""}>{log.Uid ?? "—"}</td>
+                    <td id={`logs-cell-ret-${i}`} className="logs-td" title={log.Ret !== undefined ? String(log.Ret) : ""}>{log.Ret !== undefined ? log.Ret : "—"}</td>
+                    <td id={`logs-cell-mem-${i}`} className="logs-td" title={(log as any).Ct2 ? `${(parseInt((log as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : ""}>
                       {(log as any).Ct2 ? `${(parseInt((log as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : "—"}
                     </td>
-                    <td className="logs-td logs-td-message" title={log.Msg ?? ""}>{log.Msg ?? "—"}</td>
+                    <td id={`logs-cell-msg-${i}`} className="logs-td logs-td-message" title={log.Msg ?? ""}>{log.Msg ?? "—"}</td>
                   </tr>
                 );
               })}
@@ -319,6 +330,7 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
 }
 
 export function ProcessDrillDown({ label, procs, staleSecs, onKill, onProcDotClick }: { label: string; procs: ProcEntry[]; staleSecs: number; onKill?: ((pid: number, hnm: string) => void) | undefined; onProcDotClick?: ((host: string, pid: number, eid: string) => void) | undefined }) {
+  const safeLabel = label.replace(/[^a-zA-Z0-9_\-.]/g, "_");
   const byHost = new Map<string, ProcEntry[]>();
   for (const p of procs) {
     const h = p.host ?? p.txn.lastMsg.Hnm ?? "unknown";
@@ -327,15 +339,20 @@ export function ProcessDrillDown({ label, procs, staleSecs, onKill, onProcDotCli
   }
 
   return (
-    <div className="drilldown-panel">
-      {Array.from(byHost.entries()).map(([host, hostProcs]) => (
-        <div key={host} className="drilldown-host-section">
-          <div className="drilldown-host-header">{host}</div>
-          <DrillDownTable hostProcs={hostProcs} staleSecs={staleSecs} onKill={onKill} host={host} onProcDotClick={onProcDotClick} />
-        </div>
-      ))}
+    <div id={`drilldown-panel-${safeLabel}`} className="drilldown-panel">
+      {Array.from(byHost.entries()).map(([host, hostProcs]) => {
+        const safeHost = host.replace(/[^a-zA-Z0-9_\-.]/g, "_");
+        return (
+          <div key={host} id={`drilldown-host-section-${safeHost}`} className="drilldown-host-section">
+            <div id={`drilldown-host-header-${safeHost}`} className="drilldown-host-header">{host}</div>
+            <DrillDownTable hostProcs={hostProcs} staleSecs={staleSecs} onKill={onKill} host={host} onProcDotClick={onProcDotClick} />
+          </div>
+        );
+      })}
       {byHost.size === 0 && (
-        <div className="drilldown-empty">No processes seen for <strong>{label}</strong> yet.</div>
+        <div id={`drilldown-empty-${safeLabel}`} className="drilldown-empty">
+          No processes seen for <strong>{label}</strong> yet.
+        </div>
       )}
       {procs.length > 0 && <LogsTable procs={procs} />}
     </div>

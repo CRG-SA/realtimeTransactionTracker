@@ -8,6 +8,7 @@ import { EmptyState } from "./components/EmptyState";
 import { ProcessDrillDown } from "./components/ProcessDrillDown";
 import { ServerHostBlock } from "./components/ServerHostBlock";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { SpawnTab } from "./components/SpawnTab";
 import { StatsOverlay } from "./components/StatsOverlay";
 import { SummaryItem } from "./components/SummaryItem";
 import { TxnRow } from "./components/TxnRow";
@@ -35,9 +36,9 @@ export default function App() {
   const [tps, setTps] = useState<number>(0);
   const [serverStats, setServerStats] = useState<ServerStats | null>(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("darkMode") === "true");
-  const [groupBy, setGroupBy] = useState<"tid" | "bid" | "servers" | "drilldown">(() => {
+  const [groupBy, setGroupBy] = useState<"tid" | "bid" | "servers" | "spawn" | "drilldown">(() => {
     const v = localStorage.getItem("groupBy");
-    return (v === "tid" || v === "bid" || v === "servers") ? v : "tid";
+    return (v === "tid" || v === "bid" || v === "servers" || v === "spawn") ? v : "tid";
   });
   const [expandedBids, setExpandedBids] = useState<Set<string>>(new Set());
   const [excludedBids, setExcludedBids] = useState<Set<string>>(new Set());
@@ -66,12 +67,14 @@ export default function App() {
   const messageTimesRef = useRef<number[]>([]);
   const incomingQueueRef = useRef<WireMsg[]>([]);
   const masterActivesRef = useRef<Map<string, ActiveTxn>>(new Map());
+  const spawnActivesRef = useRef<Map<string, ActiveTxn>>(new Map());
   const serverActivesRef = useRef<Map<string, ActiveTxn>>(new Map());
   const procTxnCountRef = useRef<Map<string, number>>(new Map());
   const procTxnTimesRef = useRef<Map<string, number[]>>(new Map());
   // busy intervals: { start, end? } — end=undefined means still running
   const procBusyIntervalsRef = useRef<Map<string, { start: number; end?: number }[]>>(new Map());
   const [serverActives, setServerActives] = useState<Map<string, ActiveTxn>>(new Map());
+  const [spawnActives, setSpawnActives] = useState<Map<string, ActiveTxn>>(new Map());
   const [serverTick, setServerTick] = useState(0);
 
   // Force serverGroups recompute every second so TPS/busy decay even with no incoming data
@@ -192,6 +195,9 @@ export default function App() {
               if (obj.Tid) {
                 queue.push(obj);
                 times.push(now);
+              } else if (obj.Fnm && obj.Fnm.toLowerCase().includes("spawn")) {
+                // Spawn telemetry — no Tid, route to spawn store
+                queue.push(obj);
               } else if (obj.Hnm && obj.Pid) {
                 // Lifecycle packet (DIED/SHUTDOWN/STARTUP) — no Tid, route directly
                 queue.push(obj);
@@ -338,6 +344,34 @@ export default function App() {
         }
       }
       if (changed) setServerActives(new Map(s));
+
+      // Capture spawn packets into independent store — keyed by Hnm:Pid, never auto-purged
+      const sp = spawnActivesRef.current;
+      let spawnChanged = false;
+      for (const obj of batch) {
+        const isSpawn = !!(obj.Fnm && obj.Fnm.toLowerCase().includes("spawn"));
+        if (!isSpawn) continue;
+        const spawnKey = `${obj.Hnm ?? ""}:${obj.Pid ?? 0}`;
+        const status = (obj.Status || "").toLowerCase();
+        const isTerminal = status === "success" || status === "failed" || status === "error" || status === "failure" || status === "died" || status === "coredump";
+        const existing = sp.get(spawnKey);
+        if (!existing) {
+          const txn: ActiveTxn = { tid: spawnKey, firstSeenAt: now, lastUpdateAt: now, lastMsg: obj, messages: [obj] };
+          if (isTerminal) { txn.endAt = now; txn.finalStatus = status; }
+          sp.set(spawnKey, txn);
+        } else {
+          existing.lastUpdateAt = now;
+          existing.lastMsg = obj;
+          const msgs = existing.messages || [];
+          msgs.push({ ...obj, _receivedAt: now } as any);
+          if (msgs.length > 200) msgs.shift();
+          existing.messages = msgs;
+          if (isTerminal && !existing.endAt) { existing.endAt = now; existing.finalStatus = status; }
+          sp.set(spawnKey, existing);
+        }
+        spawnChanged = true;
+      }
+      if (spawnChanged) setSpawnActives(new Map(sp));
 
       for (const [tid, txn] of m) {
         if (
@@ -757,6 +791,10 @@ export default function App() {
               className={`group-tab${groupBy === "servers" ? " group-tab-active" : ""}`}
               onClick={() => setGroupBy("servers")}
             >Robot</button>
+            <button
+              className={`group-tab${groupBy === "spawn" ? " group-tab-active" : ""}`}
+              onClick={() => setGroupBy("spawn")}
+            >Spawn</button>
             {drilldownTabs.map((key) => (
               <button
                 key={key}
@@ -785,7 +823,14 @@ export default function App() {
 
         <div className="app-body">
         <section className="txn-list">
-          {groupBy === "drilldown" && activeDrilldown ? (() => {
+          {groupBy === "spawn" ? (
+            <SpawnTab
+              actives={spawnActives}
+              thresholdSeconds={thresholdSeconds}
+              expandedTid={expandedTid}
+              onToggleTid={(tid: string) => setExpandedTid(expandedTid === tid ? null : tid)}
+            />
+          ) : groupBy === "drilldown" && activeDrilldown ? (() => {
             const label = activeDrilldown;
             // Check if it's a process-specific drilldown (format: hostPrefix:eid:pid)
             const parts = label.split(":");

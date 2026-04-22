@@ -6,6 +6,7 @@ export type WireMsg = {
   Hnm?: string;
   Pid?: number;
   Fid?: string;
+  Fnm?: string;
   Bid?: string;
   Tid: string;
   Cid?: string;

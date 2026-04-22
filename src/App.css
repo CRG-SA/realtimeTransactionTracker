@@ -564,6 +564,11 @@ body {
   color: var(--text-badge-purple);
 }
 
+.txn-badge-red {
+  background: #ef4444;
+  color: #fff;
+}
+
 /* Grid of KV pairs */
 
 .txn-grid {
@@ -584,6 +589,22 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.txn-msg-normalized {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-muted);
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-txn-message);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.txn-msg-normalized-line {
+  min-height: 1.4em;
 }
 
 .txn-msg-count {
@@ -1326,6 +1347,10 @@ body {
 .dot-dead {
   background: #9ca3af;
   box-shadow: none;
+}
+
+.dot-coredump {
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.9), 0 0 8px 2px rgba(239, 68, 68, 0.7) !important;
 }
 
 .dot-error-ring {

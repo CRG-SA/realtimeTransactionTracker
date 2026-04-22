@@ -74,6 +74,8 @@ static int n_restarts;
 static int do_quit = 0;
 
 static char hostname[512];
+static char short_hostname[512];
+static char bid[600];
 
 
 static FILE *logfile = NULL;
@@ -465,7 +467,7 @@ send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus,
     }
 
     /* Build payload with all required fields */
-    payload_size = 512 + strlen (hostname) + strlen (die_fields) + (eid ? strlen (eid) : 0);
+    payload_size = 512 + strlen (hostname) + strlen (bid) + strlen (die_fields) + (eid ? strlen (eid) : 0);
     json_payload = malloc (payload_size);
     if (!json_payload) {
         close (sock);
@@ -473,8 +475,8 @@ send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus,
     }
 
     snprintf (json_payload, payload_size,
-              "{\"Status\":\"%s\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"\",\"_recv_ts_ms\":%ld%s}",
-              status, date_str, time_str, eid ? eid : "", hostname, (long) pid, fid ? fid : "", fnm ? fnm : "", recv_ts_ms, die_fields);
+              "{\"Status\":\"%s\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"%s/%ld\",\"Bid\":\"%s\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"\",\"_recv_ts_ms\":%ld%s}",
+              status, date_str, time_str, eid ? eid : "", hostname, (long) pid, fid ? fid : "", short_hostname, (long) pid, bid, fnm ? fnm : "", recv_ts_ms, die_fields);
 
     if (sendto (sock, json_payload, strlen (json_payload), 0,
                 (struct sockaddr *) &addr, sizeof (addr)) < 0) {
@@ -558,14 +560,14 @@ send_coredump_telemetry_delayed (pid_t dead_pid, const char *eid, const char *fn
             free (coredump_raw);
         }
 
-        payload_size = 512 + strlen (hostname)
+        payload_size = 512 + strlen (hostname) + strlen (bid)
                        + (coredump_esc ? strlen (coredump_esc) + 16 : 32)
                        + (eid ? strlen (eid) : 0);
         json_payload = malloc (payload_size);
         if (json_payload) {
             snprintf (json_payload, payload_size,
-                      "{\"Status\":\"COREDUMP\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"%s\",\"_recv_ts_ms\":%ld}",
-                      date_str, time_str, eid ? eid : "", hostname, (long) dead_pid, fid ? fid : "", fnm ? fnm : "",
+                      "{\"Status\":\"COREDUMP\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"%s/%ld\",\"Bid\":\"%s\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"%s\",\"_recv_ts_ms\":%ld}",
+                      date_str, time_str, eid ? eid : "", hostname, (long) dead_pid, fid ? fid : "", short_hostname, (long) dead_pid, bid, fnm ? fnm : "",
                       coredump_esc ? coredump_esc : "unavailable", recv_ts_ms);
             sendto (sock, json_payload, strlen (json_payload), 0,
                     (struct sockaddr *) &addr, sizeof (addr));
@@ -990,6 +992,9 @@ main (int argc, char **argv)
     int HOST;
 
     HOST = gethostname(hostname,512);
+    strncpy (short_hostname, hostname, sizeof (short_hostname) - 1);
+    short_hostname[sizeof (short_hostname) - 1] = '\0';
+    { char *dot = strchr (short_hostname, '.'); if (dot) *dot = '\0'; }
     logfile = stderr;
 
     if (argc < 2)
@@ -1079,6 +1084,7 @@ main (int argc, char **argv)
 
     test_gdb ();
     server_path = get_exec (server_args[0]);
+    snprintf (bid, sizeof (bid), "%s:%s:%ld", short_hostname, file_name (server_path), (long) getpid ());
 
     /****** JR - case1221875 - always start with stdout to /dev/null *******
 
@@ -1203,9 +1209,9 @@ response from select(). */
                 }
                 log_fmt (logfile, 0, "child %s died, pid = %ld, %s, uptime = %lds", p->name, (long) p->pid,
                          s, (long) (t - p->start_time));
-                send_telemetry_udp ("DIED", p->pid, p->status, p->got_status, p->name, "main", "main");
+                send_telemetry_udp ("DIED", p->pid, p->status, p->got_status, p->name, "spawn", "spawn");
                 if (p->got_status && !WIFEXITED (p->status))
-                    send_coredump_telemetry_delayed (p->pid, p->name, "main", "analize_core_file");
+                    send_coredump_telemetry_delayed (p->pid, p->name, "spawn", "analize_core_file");
                 if (!WIFEXITED (p->status))
                     analize_core_file (p);
                 unlink (p->sym_link);

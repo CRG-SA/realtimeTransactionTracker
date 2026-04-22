@@ -56,9 +56,10 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
 
   const statusUp = (msg.Status ?? "").toUpperCase();
   const isDied = statusUp === "DIED";
+  const isCoredump = statusUp === "COREDUMP";
   const isShutdown = statusUp === "SHUTDOWN";
   const hasError = statusUp === "ERROR";
-  const dotClass = isDied || isShutdown ? "dot-dead" : stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
+  const dotClass = isCoredump ? "dot-dead dot-coredump" : isDied || isShutdown ? "dot-dead" : stale ? "dot-stale" : busy ? "dot-busy" : "dot-idle";
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -77,8 +78,9 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
   };
 
   return (
-    <div className="proc-dot-wrap">
+    <div id={`proc-dot-wrap-${pid}`} className="proc-dot-wrap">
       <div
+        id={`proc-dot-${pid}`}
         className={`server-proc-dot ${dotClass}${hasError || isDied ? " dot-error-ring" : ""}`}
         onMouseEnter={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
         onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
@@ -87,13 +89,15 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
         onContextMenu={handleContextMenu}
         style={onClick ? { cursor: "pointer" } : undefined}
       >
-        {(tps > tpsInnerDotThreshold || busyPct > busyPctInnerDotThreshold) && <div className="dot-high-tps" />}
+        {(tps > tpsInnerDotThreshold || busyPct > busyPctInnerDotThreshold) && (
+          <div id={`proc-dot-inner-${pid}`} className="dot-high-tps" />
+        )}
       </div>
       {mousePos && !contextMenu && (
-        <div className="proc-dot-popup" style={{ left: mousePos.x + 12, top: mousePos.y - 8 }}>
-          <div className="proc-dot-popup-row proc-dot-popup-title">
+        <div id={`proc-dot-popup-${pid}`} className="proc-dot-popup" style={{ left: mousePos.x + 12, top: mousePos.y - 8 }}>
+          <div id={`proc-dot-popup-title-${pid}`} className="proc-dot-popup-row proc-dot-popup-title">
             <span>{msg.Eid ? msg.Eid : `PID ${pid}`}</span>
-            <span className={`proc-dot-status ${busy ? "status-busy" : "status-idle"}`}>
+            <span id={`proc-dot-popup-status-${pid}`} className={`proc-dot-status ${busy ? "status-busy" : "status-idle"}`}>
               {busy ? "busy" : "idle"}
             </span>
           </div>
@@ -113,12 +117,14 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
         </div>
       )}
       {contextMenu && (
-        <div className="proc-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          <div className="proc-context-header">
-            <span className="proc-context-title">{msg.Eid ? msg.Eid : `PID ${pid}`}</span>
-            <button className="proc-context-close" onClick={closeContext}>✕</button>
+        <div id={`proc-context-menu-${pid}`} className="proc-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div id={`proc-context-header-${pid}`} className="proc-context-header">
+            <span id={`proc-context-title-${pid}`} className="proc-context-title">
+              {msg.Eid ? msg.Eid : `PID ${pid}`}
+            </span>
+            <button id={`proc-context-close-${pid}`} className="proc-context-close" onClick={closeContext}>✕</button>
           </div>
-          <div className="proc-context-content">
+          <div id={`proc-context-content-${pid}`} className="proc-context-content">
             <div className="proc-dot-popup-row"><span className="proc-dot-key">PID</span><span className="proc-dot-val">{pid}</span></div>
             {msg.Tid && <div className="proc-dot-popup-row"><span className="proc-dot-key">Tid</span><span className="proc-dot-val">{msg.Tid}</span></div>}
             {msg.Status && <div className="proc-dot-popup-row"><span className="proc-dot-key">Status</span><span className="proc-dot-val">{msg.Status}</span></div>}
@@ -133,7 +139,7 @@ function ProcDot({ pid, txn, staleSecs, txnCount, tps, busyPct, tpsInnerDotThres
             <div className="proc-dot-popup-row"><span className="proc-dot-key">Duration</span><span className="proc-dot-val">{human(txn.durationMs)}</span></div>
             {(msg as any).Ct2 && <div className="proc-dot-popup-row"><span className="proc-dot-key">Memory</span><span className="proc-dot-val">{(parseInt((msg as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB</span></div>}
           </div>
-          <button className="proc-context-restart-btn" onClick={handleKill}>
+          <button id={`proc-context-restart-btn-${pid}`} className="proc-context-restart-btn" onClick={handleKill}>
             Restart Process
           </button>
         </div>
@@ -153,10 +159,11 @@ export function ServerHostBlock({ group, thresholdSeconds: _thresholdSeconds, on
   onProcDotClick?: (pid: number, eid: string) => void;
   onKill?: (pid: number, hnm: string) => void;
 }) {
-  const { eids } = group;
+  const { host, eids } = group;
+  const safeHost = host.replace(/[^a-zA-Z0-9_\-.]/g, "_");
 
   return (
-    <div className="server-proc-dots" onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined}>
+    <div id={`server-proc-dots-${safeHost}`} className="server-proc-dots" onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined}>
       {eids[0]?.procs.map(({ pid, txn, txnCount, tps, busyPct }) => {
         const eid = txn.lastMsg.Eid ?? "(no eid)";
         const handleClick = onProcDotClick ? () => onProcDotClick(pid, eid) : undefined;
