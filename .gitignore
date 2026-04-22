@@ -32,3 +32,16 @@ public/config.json
 
 dirty-files*
 udpSock.json
+
+spawn/makefile.spawn
+spawn/spawn
+spawn/spawn-test
+spawn/spawn-test.c
+spawn/spawn.o
+
+.claude
+spawn/m
+spawn/spawn-coredump
+spawn/spawn-coredump.c
+spawn/t
+spawn/telemetry_listener.py

@@ -5,7 +5,7 @@ type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number }; host?: 
 
 const BUSY_LINGER_MS = 500;
 
-const DEFAULT_WIDTHS = [22, 52, 70, 50, 60, 55, 55, 180, 70, 80, 80, 80, 80, 60, 60, 260];
+const DEFAULT_WIDTHS = [22, 52, 70, 50, 60, 55, 55, 180, 70, 80, 150, 80, 80, 60, 60, 260];
 const COLS = ["", "Status", "Mem", "PID", "Txns", "Tx/s", "%Busy", "Tid", "Status", "Mtp", "Fid", "Uid", "Seen", "Dur", "Idle", "Msg"];
 
 function useColWidths() {
@@ -196,7 +196,7 @@ function DrillDownTable({ hostProcs, staleSecs, onKill, host, onProcDotClick }: 
   );
 }
 
-const LOGS_DEFAULT_WIDTHS = [90, 60, 100, 80, 80, 70, 70, 70, 70, 70, 260];
+const LOGS_DEFAULT_WIDTHS = [90, 60, 100, 80, 80, 70, 150, 70, 70, 70, 260];
 const LOGS_COLS = ["Time", "PID", "TID", "Severity", "Status", "Mtp", "Fid", "Uid", "Ret", "Mem", "Message"];
 
 function useLogsColWidths() {

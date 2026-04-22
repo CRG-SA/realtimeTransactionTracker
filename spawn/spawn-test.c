@@ -11,7 +11,7 @@ main (int argc, char **argv)
     while (1) {
         sleep (1);
         printf ("%d\n", ++c);
-        if (c > 5)
+        if (c > 60)
             exit (1);
     }
     return 0;

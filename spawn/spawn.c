@@ -335,17 +335,91 @@ struct process {
 
 struct process *process_list = NULL;
 
+/* Run coredumpctl info <pid> and return its output in a heap-allocated
+   buffer that the caller must free(). Returns NULL on failure. */
+static char *
+run_coredumpctl (pid_t pid)
+{
+    char cmd[64];
+    char *buf = NULL;
+    size_t buf_size = 0, buf_used = 0;
+    char tmp[4096];
+    FILE *fp;
+    size_t n;
+
+    snprintf (cmd, sizeof (cmd), "coredumpctl info %ld 2>&1", (long) pid);
+    fp = popen (cmd, "r");
+    if (!fp)
+        return NULL;
+
+    while ((n = fread (tmp, 1, sizeof (tmp), fp)) > 0) {
+        char *nb = realloc (buf, buf_used + n + 1);
+        if (!nb)
+            break;
+        buf = nb;
+        buf_size = buf_used + n + 1;
+        memcpy (buf + buf_used, tmp, n);
+        buf_used += n;
+    }
+    pclose (fp);
+
+    if (!buf_used) {
+        free (buf);
+        return NULL;
+    }
+    buf[buf_used] = '\0';
+    return buf;
+}
+
+/* JSON-escape src into dst (which has dst_size bytes). Returns dst. */
+static char *
+json_escape (char *dst, size_t dst_size, const char *src)
+{
+    size_t di = 0;
+    for (; *src && di + 2 < dst_size; src++) {
+        unsigned char c = (unsigned char) *src;
+        if (c == '"' || c == '\\') {
+            if (di + 3 >= dst_size) break;
+            dst[di++] = '\\';
+            dst[di++] = c;
+        } else if (c == '\n') {
+            if (di + 3 >= dst_size) break;
+            dst[di++] = '\\';
+            dst[di++] = 'n';
+        } else if (c == '\r') {
+            if (di + 3 >= dst_size) break;
+            dst[di++] = '\\';
+            dst[di++] = 'r';
+        } else if (c == '\t') {
+            if (di + 3 >= dst_size) break;
+            dst[di++] = '\\';
+            dst[di++] = 't';
+        } else if (c < 0x20) {
+            /* skip other control chars */
+        } else {
+            dst[di++] = c;
+        }
+    }
+    dst[di] = '\0';
+    return dst;
+}
+
 static void
-send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus)
+send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus, const char *eid, const char *fnm, const char *fid)
 {
     const char *host = getenv ("TELEMETRY_HOST");
     const char *port_str = getenv ("TELEMETRY_PORT");
     struct sockaddr_in addr;
     int sock;
-    char json_payload[512];
-    char die_fields[128];
+    char die_fields[256];
+    char *json_payload = NULL;
+    size_t payload_size;
     struct hostent *he;
     int port;
+    time_t now;
+    struct tm *tm_info;
+    char date_str[16], time_str[16];
+    long recv_ts_ms;
 
     if (!host || !port_str)
         return;
@@ -372,21 +446,35 @@ send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus)
     addr.sin_port = htons (port);
     memcpy (&addr.sin_addr, he->h_addr_list[0], he->h_length);
 
+    time (&now);
+    tm_info = localtime (&now);
+    strftime (date_str, sizeof (date_str), "%d/%m/%Y", tm_info);
+    strftime (time_str, sizeof (time_str), "%H:%M:%S", tm_info);
+    recv_ts_ms = (long) now * 1000;
+
     die_fields[0] = '\0';
     if (has_wstatus) {
         if (WIFEXITED (wstatus))
             snprintf (die_fields, sizeof (die_fields),
-                      ",\"DieReason\":\"exit\",\"ExitCode\":%d",
+                      ",\"Ret\":\"%d\",\"Ern\":\"0\"",
                       (int) WEXITSTATUS (wstatus));
         else
             snprintf (die_fields, sizeof (die_fields),
-                      ",\"DieReason\":\"signal\",\"Signal\":%d",
+                      ",\"Ret\":\"1\",\"Ern\":\"%d\"",
                       (int) WTERMSIG (wstatus));
     }
 
-    snprintf (json_payload, sizeof (json_payload),
-              "{\"Status\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\"%s}",
-              status, hostname, (long) pid, die_fields);
+    /* Build payload with all required fields */
+    payload_size = 512 + strlen (hostname) + strlen (die_fields) + (eid ? strlen (eid) : 0);
+    json_payload = malloc (payload_size);
+    if (!json_payload) {
+        close (sock);
+        return;
+    }
+
+    snprintf (json_payload, payload_size,
+              "{\"Status\":\"%s\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"\",\"_recv_ts_ms\":%ld%s}",
+              status, date_str, time_str, eid ? eid : "", hostname, (long) pid, fid ? fid : "", fnm ? fnm : "", recv_ts_ms, die_fields);
 
     if (sendto (sock, json_payload, strlen (json_payload), 0,
                 (struct sockaddr *) &addr, sizeof (addr)) < 0) {
@@ -395,7 +483,98 @@ send_telemetry_udp (const char *status, pid_t pid, int wstatus, int has_wstatus)
         log_fmt (logfile, 0, "telemetry: sent %s for pid %ld to %s:%d", status, (long) pid, host, port);
     }
 
+    free (json_payload);
+
     close (sock);
+}
+
+/* Fork a child that waits 10 seconds, runs coredumpctl info <pid>, and
+   sends a COREDUMP telemetry packet.  The forked child exits immediately
+   after sending so it does not interfere with the spawn main loop. */
+static void
+send_coredump_telemetry_delayed (pid_t dead_pid, const char *eid, const char *fnm, const char *fid)
+{
+    const char *host = getenv ("TELEMETRY_HOST");
+    const char *port_str = getenv ("TELEMETRY_PORT");
+    pid_t child;
+
+    if (!host || !port_str)
+        return;
+
+    child = fork ();
+    if (child < 0) {
+        log_fmt (logfile, errno, "telemetry: fork for coredump sender failed");
+        return;
+    }
+    if (child != 0)
+        return;     /* parent returns immediately */
+
+    /* --- child process --- */
+    sleep (10);
+
+    {
+        char *coredump_raw = run_coredumpctl (dead_pid);
+        char *coredump_esc = NULL;
+        char *json_payload = NULL;
+        size_t payload_size;
+        struct sockaddr_in addr;
+        struct hostent *he;
+        int sock, port;
+        time_t now;
+        struct tm *tm_info;
+        char date_str[16], time_str[16];
+        long recv_ts_ms;
+
+        port = atoi (port_str);
+        if (port <= 0 || port > 65535)
+            _exit (1);
+
+        sock = socket (AF_INET, SOCK_DGRAM, 0);
+        if (sock < 0)
+            _exit (1);
+
+        he = gethostbyname (host);
+        if (!he) {
+            close (sock);
+            _exit (1);
+        }
+
+        memset (&addr, 0, sizeof (addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons (port);
+        memcpy (&addr.sin_addr, he->h_addr_list[0], he->h_length);
+
+        time (&now);
+        tm_info = localtime (&now);
+        strftime (date_str, sizeof (date_str), "%d/%m/%Y", tm_info);
+        strftime (time_str, sizeof (time_str), "%H:%M:%S", tm_info);
+        recv_ts_ms = (long) now * 1000;
+
+        if (coredump_raw) {
+            size_t escaped_size = strlen (coredump_raw) * 2 + 1;
+            coredump_esc = malloc (escaped_size);
+            if (coredump_esc)
+                json_escape (coredump_esc, escaped_size, coredump_raw);
+            free (coredump_raw);
+        }
+
+        payload_size = 512 + strlen (hostname)
+                       + (coredump_esc ? strlen (coredump_esc) + 16 : 32)
+                       + (eid ? strlen (eid) : 0);
+        json_payload = malloc (payload_size);
+        if (json_payload) {
+            snprintf (json_payload, payload_size,
+                      "{\"Status\":\"COREDUMP\",\"Uxd\":\"%s\",\"Uxt\":\"%s\",\"Dbd\":\"\",\"Eid\":\"%s\",\"Hnm\":\"%s\",\"Pid\":\"%ld\",\"Fid\":\"%s\",\"Tid\":\"\",\"Fnm\":\"%s\",\"Mtp\":\"\",\"Key\":\"\",\"Uid\":\"\",\"Cid\":\"\",\"Icn\":\"\",\"Ocn\":\"\",\"Ret\":\"\",\"Ern\":\"\",\"Ct1\":\"\",\"Ct2\":\"\",\"Msg\":\"%s\",\"_recv_ts_ms\":%ld}",
+                      date_str, time_str, eid ? eid : "", hostname, (long) dead_pid, fid ? fid : "", fnm ? fnm : "",
+                      coredump_esc ? coredump_esc : "unavailable", recv_ts_ms);
+            sendto (sock, json_payload, strlen (json_payload), 0,
+                    (struct sockaddr *) &addr, sizeof (addr));
+            free (json_payload);
+        }
+        free (coredump_esc);
+        close (sock);
+    }
+    _exit (0);
 }
 
 static int
@@ -418,7 +597,7 @@ spawn (struct process *p)
         log_perror (p->path);
         return 1;
     }
-    send_telemetry_udp ("STARTUP", p->pid, 0, 0);
+    send_telemetry_udp ("STARTUP", p->pid, 0, 0, p->name, "spawn", "spawn");
     CHANGE_STATE (p, LIFE_STATE_WAITING_FOR_SIGCHLD);
     return 0;
 }
@@ -1024,7 +1203,9 @@ response from select(). */
                 }
                 log_fmt (logfile, 0, "child %s died, pid = %ld, %s, uptime = %lds", p->name, (long) p->pid,
                          s, (long) (t - p->start_time));
-                send_telemetry_udp ("DIED", p->pid, p->status, p->got_status);
+                send_telemetry_udp ("DIED", p->pid, p->status, p->got_status, p->name, "main", "main");
+                if (p->got_status && !WIFEXITED (p->status))
+                    send_coredump_telemetry_delayed (p->pid, p->name, "main", "analize_core_file");
                 if (!WIFEXITED (p->status))
                     analize_core_file (p);
                 unlink (p->sym_link);

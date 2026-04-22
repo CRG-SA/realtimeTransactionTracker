@@ -674,7 +674,7 @@ body {
 .txn-history-th-severity { width: 70px; }
 .txn-history-th-status { width: 70px; }
 .txn-history-th-mtp { width: 70px; }
-.txn-history-th-fid { width: 70px; }
+.txn-history-th-fid { width: 210px; }
 .txn-history-th-uid { width: 70px; }
 .txn-history-th-ret { width: 50px; }
 .txn-history-th-message { flex: 1; }
@@ -724,7 +724,7 @@ body {
 }
 
 .txn-history-td-fid {
-  width: 70px;
+  width: 210px;
   color: var(--text-secondary);
 }
 
@@ -1669,7 +1669,7 @@ body {
 .logs-th-uid,
 .logs-th-ret,
 .logs-th-mem {
-  width: 70px;
+  width: 210px;
 }
 
 .logs-td-mtp,
@@ -1677,7 +1677,7 @@ body {
 .logs-td-uid,
 .logs-td-ret,
 .logs-td-mem {
-  width: 70px;
+  width: 210px;
 }
 
 /* ---- Settings Panel ---- */

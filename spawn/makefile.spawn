@@ -1,16 +1,35 @@
+# Makefile for spawn-test project
 
-include ../../../util/makefile/makefile.vars
+# Compiler and flags
+CC      := gcc
+CFLAGS  := -Wall -Wextra -O2
+LDFLAGS := 
 
-SOURCES = spawn.c
-HEADERS = 
-EXECUTE	= spawn
-TARGET	= $(EXECUTE)
-DEST	= $(DBIN)
+# Targets and sources
+TARGET  := spawn-test
+OBJS    := spawn.o spawn-test.o
 
-USER_LIB = 
-LIBS = 
-EXTERN_LIB = 
+# Default target
+all: $(TARGET)
 
-NO_GLOBAL_LIBS=1
-include ../../../util/makefile/makefile.compile
+# Link the final executable
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
+
+# Compile object files
+spawn.o: spawn.c spawn.h spawn_version.h
+	$(CC) $(CFLAGS) -c spawn.c -o spawn.o
+
+spawn-test.o: spawn-test.c spawn.h spawn_version.h
+	$(CC) $(CFLAGS) -c spawn-test.c -o spawn-test.o
+
+# Clean build artifacts
+clean:
+	rm -f $(OBJS) $(TARGET)
+
+# Optional: rebuild everything
+rebuild: clean all
+
+# Declare phony targets
+.PHONY: all clean rebuild
 
