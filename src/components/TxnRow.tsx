@@ -91,6 +91,7 @@ export const TxnRow = React.memo(({
           <div id={`txn-kv-grid-${tid}`} className="txn-grid">
             {msg.Eid && <KV k="Eid" v={msg.Eid} />}
             {msg.Fid && <KV k="Fid" v={msg.Fid} />}
+            {msg.Key && <KV k="Key" v={msg.Key} />}
             {msg.Uid && <KV k="Uid" v={msg.Uid} />}
             {msg.Cid && <KV k="Cid" v={msg.Cid} />}
             {msg.Hnm && <KV k="Host" v={msg.Hnm} />}
@@ -135,6 +136,7 @@ export const TxnRow = React.memo(({
                     <th className="txn-history-th txn-history-th-status">Status</th>
                     <th className="txn-history-th txn-history-th-mtp">Mtp</th>
                     <th className="txn-history-th txn-history-th-fid">Fid</th>
+                    <th className="txn-history-th txn-history-th-key">Key</th>
                     <th className="txn-history-th txn-history-th-uid">Uid</th>
                     <th className="txn-history-th txn-history-th-ret">Ret</th>
                     <th className="txn-history-th txn-history-th-message">Message</th>
@@ -153,6 +155,7 @@ export const TxnRow = React.memo(({
                       <td id={`txn-hcell-status-${tid}-${idx}`} className="txn-history-td txn-history-td-status">{m.Status || "—"}</td>
                       <td id={`txn-hcell-mtp-${tid}-${idx}`} className="txn-history-td txn-history-td-mtp">{m.Mtp || "—"}</td>
                       <td id={`txn-hcell-fid-${tid}-${idx}`} className="txn-history-td txn-history-td-fid" title={m.Fid || ""}>{m.Fid || "—"}</td>
+                      <td id={`txn-hcell-key-${tid}-${idx}`} className="txn-history-td txn-history-td-key" title={m.Key || ""}>{m.Key || "—"}</td>
                       <td id={`txn-hcell-uid-${tid}-${idx}`} className="txn-history-td txn-history-td-uid" title={m.Uid || ""}>{m.Uid || "—"}</td>
                       <td id={`txn-hcell-ret-${tid}-${idx}`} className="txn-history-td txn-history-td-ret">{m.Ret !== undefined ? m.Ret : "—"}</td>
                       <td

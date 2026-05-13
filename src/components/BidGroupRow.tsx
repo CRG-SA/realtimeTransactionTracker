@@ -101,6 +101,7 @@ export function BidGroupRow({
               {lm.Hnm && <KV k="Host" v={lm.Hnm} />}
               {lm.Eid && <KV k="Eid" v={lm.Eid} />}
               {lm.Fid && <KV k="Fid" v={lm.Fid} />}
+              {lm.Key && <KV k="Key" v={lm.Key} />}
               {lm.Cid && <KV k="Cid" v={lm.Cid} />}
               {lm.Pid !== undefined && lm.Pid > 0 && <KV k="Pid" v={String(lm.Pid)} />}
             </div>

@@ -507,7 +507,7 @@ export default function App() {
       list = list.filter((t) => {
         const msg = t.lastMsg;
         const fields: Array<string | number | undefined> = [
-          t.tid, msg.Eid, msg.Fid, msg.Cid, msg.Uid,
+          t.tid, msg.Eid, msg.Fid, msg.Key, msg.Cid, msg.Uid,
           msg.Hnm, msg.Status, msg.Mtp, msg.Msg, msg.Severity,
         ];
         return fields.some((v) => v && v.toString().toLowerCase().includes(filterText));
@@ -1065,7 +1065,7 @@ export default function App() {
                     <span><strong>Status indicator:</strong> Shows transaction state (running, success, error, failed)</span>
                   </div>
                   <div className="info-rule">
-                    <span><strong>Filter:</strong> Search by TID, Eid, Fid, Uid, hostname, Status, message type, or message content</span>
+                    <span><strong>Filter:</strong> Search by TID, Eid, Fid, Key, Uid, hostname, Status, message type, or message content</span>
                   </div>
                   <div className="info-rule">
                     <span><strong>Show if ≥:</strong> Hide transactions shorter than threshold duration</span>
@@ -1101,7 +1101,7 @@ export default function App() {
                     <span><strong>Each row:</strong> A process identified by EID (Enterprise ID)</span>
                   </div>
                   <div className="info-rule">
-                    <span><strong>Columns show:</strong> PID, Transaction count, Tx/s, %Busy, latest TID, Status, Mtp, Fid, Uid, first seen time, duration, and message</span>
+                    <span><strong>Columns show:</strong> PID, Transaction count, Tx/s, %Busy, latest TID, Status, Mtp, Fid, Key, Uid, first seen time, duration, and message</span>
                   </div>
                   <div className="info-rule">
                     <span><strong>Status dots:</strong> Green (idle), Red (busy), Dark Green (stale), Grey (dead)</span>

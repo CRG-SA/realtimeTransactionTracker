@@ -6,8 +6,8 @@ type ProcEntry = { pid: number; txn: ActiveTxn & { durationMs: number }; host?: 
 
 const BUSY_LINGER_MS = 500;
 
-const DEFAULT_WIDTHS = [22, 52, 70, 50, 60, 55, 55, 180, 70, 80, 150, 80, 80, 60, 60, 260];
-const COLS = ["", "State", "Mem", "PID", "Txns", "Tx/s", "%Busy", "Tid", "Status", "Mtp", "Fid", "Uid", "Seen", "Dur", "Idle", "Msg"];
+const DEFAULT_WIDTHS = [22, 52, 70, 50, 60, 55, 55, 180, 70, 80, 150, 60, 80, 80, 60, 60, 260];
+const COLS = ["", "State", "Mem", "PID", "Txns", "Tx/s", "%Busy", "Tid", "Status", "Mtp", "Fid", "Key", "Uid", "Seen", "Dur", "Idle", "Msg"];
 
 function useColWidths() {
   const [widths, setWidths] = useState<number[]>(DEFAULT_WIDTHS);
@@ -145,6 +145,7 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
         <td id={`dd-cell-msgstatus-${pid}`} className="dd-td" title={msg.Status ?? ""}>{msg.Status ?? "—"}</td>
         <td id={`dd-cell-mtp-${pid}`} className="dd-td" title={msg.Mtp ?? ""}>{msg.Mtp ?? "—"}</td>
         <td id={`dd-cell-fid-${pid}`} className="dd-td" title={msg.Fid ?? ""}>{msg.Fid ?? "—"}</td>
+        <td id={`dd-cell-key-${pid}`} className="dd-td" title={msg.Key ?? ""}>{msg.Key ?? "—"}</td>
         <td id={`dd-cell-uid-${pid}`} className="dd-td" title={msg.Uid ?? ""}>{msg.Uid ?? "—"}</td>
         <td id={`dd-cell-seen-${pid}`} className="dd-td" title={firstSeen}>{firstSeen}</td>
         <td id={`dd-cell-dur-${pid}`} className="dd-td" title={durationStr}>{durationStr}</td>
@@ -165,6 +166,7 @@ function ProcRow({ pid, txn, staleSecs, txnCount, tps, busyPct, onKill, host, on
             {msg.Status && <div className="proc-dot-popup-row"><span className="proc-dot-key">Status</span><span className="proc-dot-val">{msg.Status}</span></div>}
             {msg.Mtp && <div className="proc-dot-popup-row"><span className="proc-dot-key">Mtp</span><span className="proc-dot-val">{msg.Mtp}</span></div>}
             {msg.Fid && <div className="proc-dot-popup-row"><span className="proc-dot-key">Fid</span><span className="proc-dot-val">{msg.Fid}</span></div>}
+            {msg.Key && <div className="proc-dot-popup-row"><span className="proc-dot-key">Key</span><span className="proc-dot-val">{msg.Key}</span></div>}
             {msg.Uid && <div className="proc-dot-popup-row"><span className="proc-dot-key">Uid</span><span className="proc-dot-val">{msg.Uid}</span></div>}
             {msg.Msg && <div className="proc-dot-popup-row"><span className="proc-dot-key">Msg</span><span className="proc-dot-val">{msg.Msg}</span></div>}
             <div className="proc-dot-popup-row"><span className="proc-dot-key">Txns</span><span className="proc-dot-val">{txnCount.toLocaleString()}</span></div>
@@ -215,8 +217,8 @@ function DrillDownTable({ hostProcs, staleSecs, onKill, host, onProcDotClick }: 
   );
 }
 
-const LOGS_DEFAULT_WIDTHS = [90, 60, 100, 80, 80, 70, 150, 70, 70, 70, 260];
-const LOGS_COLS = ["Time", "PID", "TID", "Severity", "Status", "Mtp", "Fid", "Uid", "Ret", "Mem", "Message"];
+const LOGS_DEFAULT_WIDTHS = [90, 60, 100, 80, 80, 70, 150, 60, 70, 70, 70, 260];
+const LOGS_COLS = ["Time", "PID", "TID", "Severity", "Status", "Mtp", "Fid", "Key", "Uid", "Ret", "Mem", "Message"];
 
 function useLogsColWidths() {
   const [widths, setWidths] = useState<number[]>(LOGS_DEFAULT_WIDTHS);
@@ -319,6 +321,7 @@ function LogsTable({ procs }: { procs: ProcEntry[] }) {
                     <td id={`logs-cell-status-${i}`} className="logs-td logs-td-status" title={log.Status ?? ""}>{log.Status ?? "—"}</td>
                     <td id={`logs-cell-mtp-${i}`} className="logs-td" title={log.Mtp ?? ""}>{log.Mtp ?? "—"}</td>
                     <td id={`logs-cell-fid-${i}`} className="logs-td" title={log.Fid ?? ""}>{log.Fid ?? "—"}</td>
+                    <td id={`logs-cell-key-${i}`} className="logs-td" title={log.Key ?? ""}>{log.Key ?? "—"}</td>
                     <td id={`logs-cell-uid-${i}`} className="logs-td" title={log.Uid ?? ""}>{log.Uid ?? "—"}</td>
                     <td id={`logs-cell-ret-${i}`} className="logs-td" title={log.Ret !== undefined ? String(log.Ret) : ""}>{log.Ret !== undefined ? log.Ret : "—"}</td>
                     <td id={`logs-cell-mem-${i}`} className="logs-td" title={(log as any).Ct2 ? `${(parseInt((log as any).Ct2.split(":")[0]) / 1048576).toFixed(1)} MB` : ""}>

@@ -55,6 +55,7 @@ export const ProcessRow = React.memo(({ entry, thresholdSeconds }: {
           <div id={`proc-kv-grid-${pid}`} className="txn-grid">
             {msg.Eid && <KV k="Eid" v={msg.Eid} />}
             {msg.Fid && <KV k="Fid" v={msg.Fid} />}
+            {msg.Key && <KV k="Key" v={msg.Key} />}
             {msg.Uid && <KV k="Uid" v={msg.Uid} />}
             {msg.Cid && <KV k="Cid" v={msg.Cid} />}
           </div>
